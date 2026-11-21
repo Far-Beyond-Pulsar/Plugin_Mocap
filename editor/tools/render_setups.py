@@ -103,6 +103,8 @@ def materials():
     MAT["ring"] = material("ring", (1.0, 0.8, 0.2), 0.5, emit=(1.0, 0.75, 0.15), strength=4.0)
     MAT["shared"] = material("shared", (0.3, 1.0, 0.4), 0.5, emit=(0.3, 1.0, 0.4), strength=1.2, alpha=0.35)
     MAT["title"] = material("title", (0.05, 0.09, 0.18), 0.6)
+    MAT["trail"] = material("trail", (1.0, 0.85, 0.5), 0.5, emit=(1.0, 0.8, 0.4), strength=9.0)
+    MAT["spark"] = material("spark", (1, 1, 1), 0.2, emit=(1.0, 0.95, 0.85), strength=60.0)
     MAT["label"] = material("label", (1, 1, 1), 0.5, emit=(1, 1, 1), strength=3.0)
     MAT["book1"] = material("book1", (0.7, 0.18, 0.15), 0.7)
     MAT["book2"] = material("book2", (0.18, 0.35, 0.6), 0.7)
@@ -487,6 +489,37 @@ def build(name):
         torus((0, 0, 0.02), 0.95, 0.014, "clearline")
         floor_label("both cameras see you here", (0, 1.15), 0.18)
         dimension((-2.2, -2.0, 0.02), (0, 0, 0.02), "3 m", size=0.18)
+    elif name == "wand":
+        wrist = Vector((0.3, 0.0, 2.05))
+        mannequin(raise_arm=True, ghost=sub_ghost)
+        pts = []
+        for i in range(0, 470):
+            t = i * 0.011 * 1.0
+            px = 0.9 * math.sin(1.3 * t) + 0.2 * math.cos(4.1 * t)
+            pz = 0.9 * math.cos(1.7 * t + 1.0) + 0.2 * math.sin(3.3 * t)
+            py = 1.05 + 0.95 * math.sin(0.9 * t + 0.5) * math.cos(0.37 * t)
+            pts.append(Vector((px, pz, py)))
+        shift = wrist - pts[-1]
+        pts = [p + shift for p in pts]
+        curve = bpy.data.curves.new("trail", "CURVE")
+        curve.dimensions = "3D"
+        curve.bevel_depth = 0.011
+        curve.bevel_resolution = 3
+        spline = curve.splines.new("POLY")
+        spline.points.add(len(pts) - 1)
+        for point, p in zip(spline.points, pts):
+            point.co = (p.x, p.y, p.z, 1.0)
+        trail = bpy.data.objects.new("trail", curve)
+        bpy.context.collection.objects.link(trail)
+        trail.data.materials.append(MAT["trail"])
+        sphere(wrist, 0.05, "spark", seg=24)
+        bpy.ops.object.light_add(type="POINT", location=tuple(wrist))
+        glow = bpy.context.active_object
+        glow.data.energy = 220
+        glow.data.color = (1.0, 0.9, 0.7)
+        glow.data.shadow_soft_size = 0.05
+        scene_cameras(ring_positions(3, 2.3, 1.5))
+        floor_label("LIGHT: wave a flashlight through the shared space", (0.0, 0.0), 0.26)
     elif name == "space":
         mannequin(ghost=False)
         w, h = 3.0, 2.3
@@ -510,6 +543,7 @@ VIEWS = {
     "line": ((-5.3, -7.3, 4.6), (0.1, 0.0, 0.9)),
     "body": ((-5.3, -7.3, 4.6), (0.1, 0.0, 0.9)),
     "space": ((-5.3, -7.3, 4.6), (0.1, 0.0, 0.9)),
+    "wand": ((-5.3, -7.3, 4.6), (0.1, 0.0, 0.9)),
 }
 
 
@@ -541,5 +575,5 @@ def render(name):
     bpy.ops.render.render(write_still=True)
 
 
-for n in ONLY or ["ring", "arc", "line", "body", "space"]:
+for n in ONLY or ["ring", "arc", "line", "body", "space", "wand"]:
     render(n)

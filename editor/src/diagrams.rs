@@ -15,10 +15,12 @@ pub enum Diagram {
     Body,
     /// The space to keep clear around the subject.
     Space,
+    /// Waving a light through the shared space.
+    Wand,
 }
 
 impl Diagram {
-    const ALL: [Diagram; 5] = [Diagram::Ring, Diagram::Arc, Diagram::Line, Diagram::Body, Diagram::Space];
+    const ALL: [Diagram; 6] = [Diagram::Ring, Diagram::Arc, Diagram::Line, Diagram::Body, Diagram::Space, Diagram::Wand];
 
     fn png(self) -> &'static [u8] {
         match self {
@@ -27,6 +29,7 @@ impl Diagram {
             Diagram::Line => include_bytes!("../assets/line.png"),
             Diagram::Body => include_bytes!("../assets/body.png"),
             Diagram::Space => include_bytes!("../assets/space.png"),
+            Diagram::Wand => include_bytes!("../assets/wand.png"),
         }
     }
 
@@ -38,6 +41,7 @@ impl Diagram {
             Diagram::Line => "Line: a wall of cameras",
             Diagram::Body => "Movement: cameras anywhere, positions found from the subject's movement",
             Diagram::Space => "The space to keep clear around the subject",
+            Diagram::Wand => "Light: wave a flashlight through the space the cameras share",
         }
     }
 

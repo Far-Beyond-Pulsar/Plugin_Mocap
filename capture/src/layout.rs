@@ -61,7 +61,7 @@ pub fn model_for(p: &Placement) -> CameraModel {
     let y = z.cross(&x);
     let rotation = Matrix3::from_rows(&[x.transpose(), y.transpose(), z.transpose()]);
     let focal_px = f64::from(p.width) * 0.5 / (p.hfov_deg.clamp(20.0, 150.0).to_radians() * 0.5).tan();
-    CameraModel { id: p.id.clone(), width: p.width, height: p.height, focal_px, rotation, translation: -(rotation * position) }
+    CameraModel { id: p.id.clone(), width: p.width, height: p.height, focal_px, rotation, translation: -(rotation * position), k1: 0.0, k2: 0.0 }
 }
 
 /// Places `count` cameras on `arrangement` at `distance` metres from the subject and `height`

@@ -25,6 +25,9 @@ mod skeleton;
 mod source;
 mod solver;
 mod sync;
+mod blob;
+mod bundle;
+mod wand;
 mod synthetic;
 mod vmc;
 
@@ -42,6 +45,9 @@ pub use keypoints::{coco17_rig, decode_single_person, letterbox_rgb, Letterbox, 
 pub use frame::{PixelFormat, PoseFrame, VideoFrame};
 pub use mix::{merge_rigs, MixInput, Mixer, DEFAULT_DELAY_S, DEFAULT_RATE_HZ, MAX_SYNC_LAG_S};
 pub use solver::{BodySolver, Solved, LINK_COUNT};
+pub use bundle::{bundle_adjust, Observation as BundleObservation, Options as BundleOptions, Report as BundleReport};
+pub use blob::{find_light, LightSpot};
+pub use wand::{WandCalibrator, WandError, WandResult, MAX_SAMPLES as WAND_MAX_SAMPLES, MIN_SAMPLES as WAND_MIN_SAMPLES, SAMPLES_TARGET as WAND_SAMPLES_TARGET};
 pub use sync::{estimate_offset, ColumnPlan, History, SyncEstimate};
 pub use processor::{apply_calibration, calibrate_neutral, FilterSettings, Processor};
 pub use recorder::{RecordStats, Recorder, MAX_HOLD_S};

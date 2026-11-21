@@ -71,7 +71,7 @@ pub fn look_at(id: &str, position: Vector3<f64>, target: Vector3<f64>, width: u3
     let x = y.cross(&z).normalize();
     let y = z.cross(&x);
     let rotation = Matrix3::from_rows(&[x.transpose(), y.transpose(), z.transpose()]);
-    CameraModel { id: id.to_owned(), width, height, focal_px: focal, rotation, translation: -(rotation * position) }
+    CameraModel { id: id.to_owned(), width, height, focal_px: focal, rotation, translation: -(rotation * position), k1: 0.0, k2: 0.0 }
 }
 
 pub fn truth_cameras(count: usize) -> Vec<CameraModel> {

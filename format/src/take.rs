@@ -65,6 +65,11 @@ pub struct CameraCalibration {
     pub focal_px: f64,
     pub rotation: [f64; 9],
     pub translation: [f64; 3],
+    /// Radial lens distortion coefficients (zero in takes made before they were estimated).
+    #[serde(default)]
+    pub k1: f64,
+    #[serde(default)]
+    pub k2: f64,
 }
 
 /// What the performer's neutral pose and scale measured: applied on read,

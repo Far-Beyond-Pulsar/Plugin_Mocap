@@ -74,7 +74,8 @@ fn describe(method: CalibrationMethod) -> (&'static str, &'static str, Diagram) 
         CalibrationMethod::Layout(Arrangement::Ring) => ("Ring", "Cameras evenly around you, all aimed at you: the best coverage of the whole body. Placed exactly from the numbers below; no movement needed.", Diagram::Ring),
         CalibrationMethod::Layout(Arrangement::Arc) => ("Arc", "Cameras over a half circle in front of you, like a desk or a stage. Placed exactly from the numbers below; no movement needed.", Diagram::Arc),
         CalibrationMethod::Layout(Arrangement::Line) => ("Line", "Cameras side by side in a row facing you, a wall of cameras. Placed exactly from the numbers below; no movement needed.", Diagram::Line),
-        CalibrationMethod::Body => ("Movement", "Cameras anywhere: their positions are worked out from you doing a few guided movements. Needs the cameras to see overlapping parts of you; the least exact method.", Diagram::Body),
+        CalibrationMethod::Wand => ("Light", "The most accurate. In a dim room, wave a phone flashlight or an LED through the space the cameras share. Every camera that sees it gives an exact point: the cameras' positions, focal lengths and lens distortion come out together. Touch the floor with it once.", Diagram::Wand),
+        CalibrationMethod::Body => ("Movement", "Cameras anywhere, no light needed: their positions are worked out from you doing a few guided movements. Needs the cameras to see overlapping parts of you, and guesses the lenses; the least exact method.", Diagram::Body),
     }
 }
 
@@ -100,6 +101,7 @@ fn method_picker(model: &Entity<SessionModel>, current: CalibrationMethod, locke
         .child(choose("m-ring", CalibrationMethod::Layout(Arrangement::Ring)))
         .child(choose("m-arc", CalibrationMethod::Layout(Arrangement::Arc)))
         .child(choose("m-line", CalibrationMethod::Layout(Arrangement::Line)))
+        .child(choose("m-wand", CalibrationMethod::Wand))
         .child(choose("m-body", CalibrationMethod::Body))
 }
 
@@ -168,6 +170,40 @@ fn guiding(model: &Entity<SessionModel>, cx: &App) -> Div {
         )
 }
 
+/// Collecting the light: what each camera has seen, and how much of its image the light has covered.
+fn wand_guiding(model: &Entity<SessionModel>, cx: &App) -> Div {
+    let theme = cx.theme();
+    let m = model.read(cx);
+    let progress = (m.calib.collected as f32 / mocap_capture::WAND_SAMPLES_TARGET as f32).min(1.0);
+    let ready = m.calib.collected >= mocap_capture::WAND_MIN_SAMPLES;
+    let rows: Vec<Div> = m
+        .calib
+        .wand_progress()
+        .into_iter()
+        .map(|(id, seen, coverage)| {
+            let color = if coverage >= 0.5 { theme.success } else { theme.warning };
+            h_flex()
+                .gap_2()
+                .text_xs()
+                .child(div().flex_1().min_w_0().truncate().child(id))
+                .child(div().flex_shrink_0().child(format!("{seen} moments")))
+                .child(div().w(px(64.)).flex_shrink_0().text_color(color).child(format!("{:.0}% of image", coverage * 100.0)))
+        })
+        .collect();
+    section("Wave the light", cx)
+        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Wave it slowly through the space the cameras share: high and low, near and far, into every corner of each camera's image. Touch the floor once."))
+        .child(div().h(px(6.)).w_full().bg(theme.border).child(div().h_full().w(relative(progress)).bg(theme.accent)))
+        .child(note(format!("{} moments (it solves at {}, or press Solve now from {})", m.calib.collected, mocap_capture::WAND_SAMPLES_TARGET, mocap_capture::WAND_MIN_SAMPLES), cx))
+        .children(rows)
+        .child(note("A small ring marks the light in each camera view. Only one bright point should be in view: dim the room and cover other lights.", cx))
+        .child(
+            h_flex()
+                .gap_1()
+                .when(ready, |row| row.child(action(model, "wand-solve", "Solve now", SessionModel::solve_wand_calibration).primary()))
+                .child(action(model, "calib-cancel", "Cancel", SessionModel::cancel_camera_calibration).ghost()),
+        )
+}
+
 fn result(model: &Entity<SessionModel>, cx: &App) -> Div {
     let theme = cx.theme();
     let m = model.read(cx);
@@ -194,11 +230,14 @@ impl SetupPanel {
     fn cameras_section(&self, cx: &App) -> Div {
         let theme = cx.theme();
         let m = self.model.read(cx);
-        let ready = m.tracked_camera_count();
+        let wand = m.calib.method == CalibrationMethod::Wand;
+        let ready = if wand { m.video_camera_count() } else { m.tracked_camera_count() };
+        let what = if wand { "running" } else { "tracking the body" };
         let (text, color) = match ready {
+            0 if wand => ("No camera is running. Add cameras in Sources and start them.".to_owned(), theme.warning),
             0 => ("No camera is tracking the body. Add cameras in Sources and press Track body on each.".to_owned(), theme.warning),
-            1 => ("1 camera is tracking the body. Calibration needs at least two.".to_owned(), theme.warning),
-            n => (format!("{n} cameras are tracking the body."), theme.success),
+            1 => (format!("1 camera is {what}. Calibration needs at least two."), theme.warning),
+            n => (format!("{n} cameras are {what}."), theme.success),
         };
         section("1  Cameras", cx).child(div().text_xs().text_color(color).child(text))
     }
@@ -249,13 +288,42 @@ impl SetupPanel {
             .when_some(space, |col, image| col.child(picture(&self.model, Diagram::Space, image)))
     }
 
+    /// The one measurement the light method needs: how far apart two cameras are, which sets the size of the space.
+    fn size_section(&self, cx: &App) -> Div {
+        let m = self.model.read(cx);
+        let nudge = |id: &'static str, label: &'static str, delta: f64| {
+            let handle = self.model.clone();
+            Button::new(id).label(label).ghost().xsmall().on_click(move |_, _, cx| {
+                handle.update(cx, |m, cx| {
+                    m.adjust_wand_distance(delta);
+                    cx.notify();
+                });
+            })
+        };
+        section("3  Size of the space", cx)
+            .child(note("Measure the distance between the first two cameras (the first two sources), lens to lens. It is the one measurement the light cannot make.", cx))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .text_xs()
+                    .child(div().w(px(96.)).flex_shrink_0().text_color(cx.theme().muted_foreground).child("Camera 1 to 2"))
+                    .child(nudge("wd-", "-", -0.1))
+                    .child(div().w(px(56.)).flex_shrink_0().whitespace_nowrap().text_center().child(format!("{:.2} m", m.calib.wand_distance)))
+                    .child(nudge("wd+", "+", 0.1)),
+            )
+    }
+
     fn start_section(&self, cx: &App) -> Div {
         let layout = matches!(self.model.read(cx).calib.method, CalibrationMethod::Layout(_));
-        let step = if layout { "4  Place the cameras" } else { "3  Calibrate" };
+        let wand = self.model.read(cx).calib.method == CalibrationMethod::Wand;
+        let step = if layout { "4  Place the cameras" } else if wand { "4  Wave the light" } else { "3  Calibrate" };
         section(step, cx)
             .child(note("Cameras are assigned in the order of their sources.", cx))
             .child(h_flex().gap_1().child(if layout {
                 action(&self.model, "calib-apply", "Place cameras", SessionModel::apply_camera_layout).primary()
+            } else if wand {
+                action(&self.model, "calib-wand", "Start waving", SessionModel::start_wand_calibration).primary()
             } else {
                 action(&self.model, "calib-start", "Start guided calibration", SessionModel::start_camera_calibration).primary()
             }))
@@ -342,19 +410,26 @@ impl Panel for SetupPanel {
 
 impl Render for SetupPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (phase, calibrated, layout) = {
+        let (phase, calibrated, layout, method) = {
             let m = self.model.read(cx);
-            (m.calib.phase.clone(), m.camera_rig.is_some(), matches!(m.calib.method, CalibrationMethod::Layout(_)))
+            (m.calib.phase.clone(), m.camera_rig.is_some(), matches!(m.calib.method, CalibrationMethod::Layout(_)), m.calib.method)
         };
         let column = v_flex().id("mocap-setup-scroll").size_full().overflow_x_hidden().overflow_y_scroll().bg(cx.theme().background).child(self.cameras_section(cx));
         let column = match phase {
+            CalibrationPhase::Guiding if method == CalibrationMethod::Wand => column.child(wand_guiding(&self.model, cx)),
             CalibrationPhase::Guiding => column.child(guiding(&self.model, cx)),
             CalibrationPhase::Solving => column.child(section("Calibrating", cx).child(note("Solving the camera positions...", cx))),
             CalibrationPhase::Done => column.child(result(&self.model, cx)),
             CalibrationPhase::Idle if calibrated => column.child(result(&self.model, cx)),
             _ => {
                 let column = column.child(self.method_section(cx));
-                let column = if layout { column.child(self.layout_section(cx)) } else { column };
+                let column = if layout {
+                    column.child(self.layout_section(cx))
+                } else if method == CalibrationMethod::Wand {
+                    column.child(self.size_section(cx))
+                } else {
+                    column
+                };
                 column.child(self.start_section(cx))
             }
         };

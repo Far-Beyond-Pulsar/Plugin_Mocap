@@ -4,8 +4,10 @@
 //! turns the trackers' 2D keypoints into recorded, triangulated 3D ones.
 
 use super::{SessionModel, SourceEntry};
+
+mod wand;
 use editor_task_queue::{TaskDescription, TaskDuration};
-use mocap_capture::{BodySolver, arrange, rig_from_placements, Arrangement, CalibrationError, Calibrator, CameraRig, CameraSpec, Check, EstimatorSource, Features, Guide, HoldAverager, PoseFrame, Step, SAMPLES_TARGET};
+use mocap_capture::{WandCalibrator, BodySolver, arrange, rig_from_placements, Arrangement, CalibrationError, Calibrator, CameraRig, CameraSpec, Check, EstimatorSource, Features, Guide, HoldAverager, PoseFrame, Step, SAMPLES_TARGET};
 use mocap_format::{ChannelDesc, ChannelKind, Quantisation, RigProfile};
 use parking_lot::Mutex;
 use std::ops::Range;
@@ -23,6 +25,9 @@ pub enum Method {
     Layout(Arrangement),
     /// Worked out from the subject performing guided movements.
     Body,
+    /// Worked out from a moving point of light (a phone flashlight or LED) waved through the shared space:
+    /// the most accurate method, it finds each camera's focal length and lens distortion too.
+    Wand,
 }
 
 /// Where the calibration is.
@@ -53,6 +58,14 @@ pub struct CalibrationFlow {
     pub height: f64,
     /// Layout method: the cameras' horizontal field of view, degrees.
     pub hfov_deg: f64,
+    /// Wand method: metres between the first two cameras, which sets the size of the space.
+    pub wand_distance: f64,
+    /// Wand method: moments each camera saw the light in, and how much of its image the light covered.
+    pub wand_seen: Vec<usize>,
+    pub wand_coverage: Vec<f64>,
+    wand: Option<WandCalibrator>,
+    wand_cams: Vec<String>,
+    wand_views: Vec<wand::WandView>,
     calibrator: Option<Calibrator>,
     /// Averages a held pose over several frames into one clean sample.
     averager: HoldAverager,
@@ -75,6 +88,12 @@ impl Default for CalibrationFlow {
             distance: 3.0,
             height: 1.5,
             hfov_deg: 70.0,
+            wand_distance: 2.0,
+            wand_seen: Vec::new(),
+            wand_coverage: Vec::new(),
+            wand: None,
+            wand_cams: Vec::new(),
+            wand_views: Vec::new(),
             calibrator: None,
             averager: HoldAverager::new(),
             trackers: Vec::new(),
@@ -257,6 +276,7 @@ impl SessionModel {
     pub fn cancel_camera_calibration(&mut self) {
         self.calib.phase = Phase::Idle;
         self.calib.calibrator = None;
+        self.calib.wand = None;
     }
 
     /// Forgets the solved cameras: keypoints are 2D again.
@@ -295,6 +315,7 @@ impl SessionModel {
     pub(super) fn calibration_tick(&mut self) -> bool {
         match self.calib.phase {
             Phase::Solving => self.finish_solve(),
+            Phase::Guiding if self.calib.method == Method::Wand => self.collect_wand(),
             Phase::Guiding => self.collect_sample(),
             _ => false,
         }
@@ -439,7 +460,7 @@ mod tests {
         let x = norm(cross([0.0, -1.0, 0.0], z));
         let y = cross(z, x);
         let t = [-(x[0] * position[0] + x[1] * position[1] + x[2] * position[2]), -(y[0] * position[0] + y[1] * position[1] + y[2] * position[2]), -(z[0] * position[0] + z[1] * position[1] + z[2] * position[2])];
-        CameraCalibration { id: id.to_owned(), width: 1280, height: 720, focal_px: 900.0, rotation: [x[0], x[1], x[2], y[0], y[1], y[2], z[0], z[1], z[2]], translation: t }
+        CameraCalibration { id: id.to_owned(), width: 1280, height: 720, focal_px: 900.0, rotation: [x[0], x[1], x[2], y[0], y[1], y[2], z[0], z[1], z[2]], translation: t, ..Default::default() }
     }
 
     fn project(c: &CameraCalibration, p: [f64; 3]) -> [f32; 3] {

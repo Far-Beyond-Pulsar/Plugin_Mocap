@@ -105,6 +105,9 @@ pub struct CameraModel {
     pub focal_px: f64,
     pub rotation: Matrix3<f64>,
     pub translation: Vector3<f64>,
+    /// Radial lens distortion (`x_d = x_u * (1 + k1 r^2 + k2 r^4)` in normalised coordinates); zero is a pinhole.
+    pub k1: f64,
+    pub k2: f64,
 }
 
 impl CameraModel {
@@ -133,11 +136,46 @@ impl CameraModel {
 
     pub(crate) fn normalise(&self, p: [f32; 3]) -> [f64; 2] {
         let (cx, cy) = self.centre();
-        [(f64::from(p[0]) * f64::from(self.width) - cx) / self.focal_px, (f64::from(p[1]) * f64::from(self.height) - cy) / self.focal_px]
+        self.undistort([(f64::from(p[0]) * f64::from(self.width) - cx) / self.focal_px, (f64::from(p[1]) * f64::from(self.height) - cy) / self.focal_px])
     }
 
+    /// Normalised coordinates with the lens distortion removed (a few fixed-point steps).
+    pub fn undistort(&self, d: [f64; 2]) -> [f64; 2] {
+        if self.k1 == 0.0 && self.k2 == 0.0 {
+            return d;
+        }
+        let mut u = d;
+        for _ in 0..8 {
+            let r2 = u[0] * u[0] + u[1] * u[1];
+            let scale = 1.0 + self.k1 * r2 + self.k2 * r2 * r2;
+            u = [d[0] / scale, d[1] / scale];
+        }
+        u
+    }
+
+    /// Normalised coordinates with the lens distortion applied.
+    pub fn distort(&self, u: [f64; 2]) -> [f64; 2] {
+        let r2 = u[0] * u[0] + u[1] * u[1];
+        let scale = 1.0 + self.k1 * r2 + self.k2 * r2 * r2;
+        [u[0] * scale, u[1] * scale]
+    }
+
+    /// The pixel `world` appears at through the lens, distortion included (`project` is the ideal pinhole).
+    pub fn project_raw(&self, world: Vector3<f64>) -> Option<[f64; 2]> {
+        let x = self.rotation * world + self.translation;
+        if x[2] <= 1e-3 {
+            return None;
+        }
+        let (cx, cy) = self.centre();
+        let d = self.distort([x[0] / x[2], x[1] / x[2]]);
+        Some([cx + self.focal_px * d[0], cy + self.focal_px * d[1]])
+    }
+
+    /// The pixel of a detection with the distortion removed, so it compares with `project`.
     pub(crate) fn pixel(&self, p: [f32; 3]) -> [f64; 2] {
-        [f64::from(p[0]) * f64::from(self.width), f64::from(p[1]) * f64::from(self.height)]
+        let (cx, cy) = self.centre();
+        let n = self.normalise(p);
+        [cx + self.focal_px * n[0], cy + self.focal_px * n[1]]
     }
 
     /// The storable form.
@@ -150,6 +188,8 @@ impl CameraModel {
             focal_px: self.focal_px,
             rotation: [r[(0, 0)], r[(0, 1)], r[(0, 2)], r[(1, 0)], r[(1, 1)], r[(1, 2)], r[(2, 0)], r[(2, 1)], r[(2, 2)]],
             translation: [self.translation[0], self.translation[1], self.translation[2]],
+            k1: self.k1,
+            k2: self.k2,
         }
     }
 
@@ -162,6 +202,8 @@ impl CameraModel {
             focal_px: c.focal_px,
             rotation: Matrix3::from_row_slice(&c.rotation),
             translation: Vector3::from_row_slice(&c.translation),
+            k1: c.k1,
+            k2: c.k2,
         }
     }
 }
@@ -339,6 +381,8 @@ impl Calibrator {
                 focal_px: Self::guess_focal(s),
                 rotation: Matrix3::identity(),
                 translation: Vector3::zeros(),
+                k1: 0.0,
+                k2: 0.0,
             })
             .collect()
     }
