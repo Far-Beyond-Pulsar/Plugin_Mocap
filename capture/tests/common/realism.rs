@@ -1,7 +1,7 @@
 //! A webcam keypoint detector as it really behaves: noisy, with gross misses,
 //! dropouts, timing jitter, and cameras that see only part of the body.
 
-use super::{angle_deg, subject, Noise};
+use super::{angle_deg, human, subject, Noise};
 use mocap_capture::{CalibrationError, Calibrator, CameraModel, CameraRig, CameraSpec};
 use nalgebra::Vector3;
 
@@ -18,6 +18,8 @@ pub struct Quality {
     pub sync_jitter: f64,
     /// The keypoints this camera can see at all (a close or tilted camera crops the body).
     pub sees: fn(usize) -> bool,
+    /// The subject has human knees (see `human`).
+    pub human: bool,
 }
 
 pub fn everything(_: usize) -> bool {
@@ -47,17 +49,23 @@ pub fn legs_only(k: usize) -> bool {
 impl Quality {
     /// A plain, noisy detector that sees the whole body.
     pub fn webcam() -> Self {
-        Self { sigma: 3.0, outliers: 0.03, dropout: 0.08, sync_jitter: 0.016, sees: everything }
+        Self { sigma: 3.0, outliers: 0.03, dropout: 0.08, sync_jitter: 0.016, sees: everything, human: false }
     }
 
     pub fn seeing(self, sees: fn(usize) -> bool) -> Self {
         Self { sees, ..self }
     }
+
+    /// Observing a subject whose knees bend like a human's.
+    pub fn human(self) -> Self {
+        Self { human: true, ..self }
+    }
 }
 
 /// One camera's detections of the subject at time `t`, in `quality`.
 pub fn observe_real(cam: &CameraModel, t: f64, noise: &mut Noise, quality: &Quality) -> Option<Vec<[f32; 3]>> {
-    let joints = subject(t + quality.sync_jitter * (2.0 * noise.uniform() - 1.0));
+    let when = t + quality.sync_jitter * (2.0 * noise.uniform() - 1.0);
+    let joints = if quality.human { human(when) } else { subject(when) };
     let points: Vec<[f32; 3]> = joints
         .iter()
         .enumerate()

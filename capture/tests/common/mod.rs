@@ -22,6 +22,15 @@ impl Noise {
 /// The subject's COCO-17 joints at time `t`, in metres (+Y up, facing +Z at yaw 0,
 /// left at +X). Body proportions equal the calibration's priors.
 pub fn subject(t: f64) -> [Vector3<f64>; 17] {
+    subject_bend(t, 1.0)
+}
+
+/// The same subject with human knees (the shin bends back, never forward): for the tests of anatomy.
+pub fn human(t: f64) -> [Vector3<f64>; 17] {
+    subject_bend(t, -1.0)
+}
+
+fn subject_bend(t: f64, leg_bend: f64) -> [Vector3<f64>; 17] {
     let yaw = 0.8 * (0.9 * t).sin();
     let facing = Vector3::new(yaw.sin(), 0.0, yaw.cos());
     let left = Vector3::new(yaw.cos(), 0.0, -yaw.sin());
@@ -32,16 +41,16 @@ pub fn subject(t: f64) -> [Vector3<f64>; 17] {
     let (lh, rh) = (pelvis + left * 0.10, pelvis - left * 0.10);
     let swing = |phase: f64| 0.6 * (1.7 * t + phase).sin();
     // A limb hanging from `from`, bending at the middle joint, swinging forward and back.
-    let limb = |from: Vector3<f64>, a: f64, b: f64, angle: f64, side: f64| {
+    let limb = |from: Vector3<f64>, a: f64, b: f64, angle: f64, side: f64, bend: f64| {
         let dir = |theta: f64| up * -theta.cos() + facing * theta.sin() + left * side * 0.15;
         let mid = from + dir(angle).normalize() * a;
-        let end = mid + dir(angle + 0.5 + 0.3 * angle.sin()).normalize() * b;
+        let end = mid + dir(angle + bend * (0.5 + 0.3 * angle.sin())).normalize() * b;
         (mid, end)
     };
-    let (lel, lwr) = limb(ls, 0.29, 0.26, swing(0.0), 1.0);
-    let (rel, rwr) = limb(rs, 0.29, 0.26, swing(3.1), -1.0);
-    let (lkn, lan) = limb(lh, 0.42, 0.40, swing(3.1) * 0.7, 1.0);
-    let (rkn, ran) = limb(rh, 0.42, 0.40, swing(0.0) * 0.7, -1.0);
+    let (lel, lwr) = limb(ls, 0.29, 0.26, swing(0.0), 1.0, 1.0);
+    let (rel, rwr) = limb(rs, 0.29, 0.26, swing(3.1), -1.0, 1.0);
+    let (lkn, lan) = limb(lh, 0.42, 0.40, swing(3.1) * 0.7, 1.0, leg_bend);
+    let (rkn, ran) = limb(rh, 0.42, 0.40, swing(0.0) * 0.7, -1.0, leg_bend);
     let head = neck + up * 0.22;
     [
         head + facing * 0.1,

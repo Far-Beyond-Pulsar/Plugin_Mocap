@@ -3,7 +3,7 @@
 
 mod common;
 use common::realism::{forearm_and_legs, observe_real, torso_down, up_to_hips, Quality};
-use common::{subject, truth_cameras, Noise};
+use common::{human as subject, truth_cameras, Noise};
 use mocap_capture::{BodySolver, CameraRig, COCO17_EDGES};
 use nalgebra::Vector3;
 
@@ -88,7 +88,7 @@ fn run(qualities: &[Quality], seconds: f64, seed: u64) -> Outcome {
 
 #[test]
 fn with_three_full_cameras_the_solver_is_more_accurate_and_steadier() {
-    let o = run(&[Quality::webcam(), Quality::webcam(), Quality::webcam()], 14.0, 11);
+    let o = run(&[Quality::webcam().human(), Quality::webcam().human(), Quality::webcam().human()], 14.0, 11);
     eprintln!("rms solver {:.4} independent {:.4}; forearm sd {:.4} vs {:.4}", o.solver_rms, o.independent_rms, o.solver_forearm_sd, o.independent_forearm_sd);
     assert!(o.solver_rms < o.independent_rms, "{:.4} vs {:.4}", o.solver_rms, o.independent_rms);
     assert!(o.solver_rms < 0.04, "{:.4}", o.solver_rms);
@@ -99,7 +99,7 @@ fn with_three_full_cameras_the_solver_is_more_accurate_and_steadier() {
 fn it_answers_for_joints_that_only_one_camera_sees() {
     // One camera sees the top half, one the bottom half, one everything: the legs and arms are each seen by two,
     // but with a camera of the three missing there are frames in which only one sees a joint.
-    let qualities = [Quality::webcam().seeing(up_to_hips), Quality::webcam().seeing(torso_down), Quality::webcam().seeing(forearm_and_legs)];
+    let qualities = [Quality::webcam().human().seeing(up_to_hips), Quality::webcam().human().seeing(torso_down), Quality::webcam().human().seeing(forearm_and_legs)];
     let o = run(&qualities, 14.0, 21);
     eprintln!("answered solver {:.1} independent {:.1}; rms {:.4} vs {:.4}", o.solver_answered, o.independent_answered, o.solver_rms, o.independent_rms);
     assert!(o.solver_answered >= o.independent_answered, "{:.1} vs {:.1}", o.solver_answered, o.independent_answered);
@@ -108,7 +108,7 @@ fn it_answers_for_joints_that_only_one_camera_sees() {
 
 #[test]
 fn gross_misses_do_not_drag_the_body() {
-    let bad = Quality { outliers: 0.15, ..Quality::webcam() };
+    let bad = Quality { outliers: 0.15, ..Quality::webcam().human() };
     let o = run(&[bad.clone(), bad.clone(), bad], 14.0, 31);
     eprintln!("outliers: rms {:.4} vs {:.4}", o.solver_rms, o.independent_rms);
     assert!(o.solver_rms < 0.06, "{:.4}", o.solver_rms);
@@ -121,7 +121,7 @@ fn the_learned_bone_lengths_match_the_subject_and_left_matches_right() {
     let rig = CameraRig::from_cameras(cams.clone());
     let mut solver = BodySolver::new(&rig);
     let mut noise = Noise(5);
-    let q = Quality::webcam();
+    let q = Quality::webcam().human();
     for f in 0..240 {
         let t = f as f64 / 30.0;
         let views: Vec<Option<Vec<[f32; 3]>>> = cams.iter().map(|c| observe_real(c, t, &mut noise, &q)).collect();
@@ -145,8 +145,9 @@ fn a_joint_nobody_sees_is_carried_briefly_and_then_dropped() {
     let cams = truth_cameras(3);
     let rig = CameraRig::from_cameras(cams.clone());
     let mut solver = BodySolver::new(&rig);
+    solver.use_anatomy = false; // the raw solver: a joint nobody sees is dropped (the anatomy would estimate it)
     let mut noise = Noise(7);
-    let q = Quality { dropout: 0.0, outliers: 0.0, ..Quality::webcam() };
+    let q = Quality { dropout: 0.0, outliers: 0.0, ..Quality::webcam().human() };
     let seen = |t: f64, noise: &mut Noise| -> Vec<Option<Vec<[f32; 3]>>> { cams.iter().map(|c| observe_real(c, t, noise, &q)).collect() };
     for f in 0..90 {
         let views = seen(f as f64 / 30.0, &mut noise);

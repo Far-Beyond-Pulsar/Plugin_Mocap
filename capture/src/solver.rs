@@ -15,6 +15,7 @@
 //! The result is smoother and more accurate than independent triangulation, and it has an answer for
 //! joints that fewer than two cameras see.
 
+use crate::anatomy::Anatomy;
 use crate::calibration::{good, CameraModel, CameraRig, KEYPOINTS, RELIABILITY};
 use nalgebra::{DMatrix, DVector, Vector3};
 
@@ -59,8 +60,10 @@ const ITERATIONS: usize = 6;
 pub struct Solved {
     /// Joint positions, metres (`NaN` where the joint is not known).
     pub points: [[f32; 3]; KEYPOINTS],
-    /// How many cameras detected each joint this frame (0: carried from before).
+    /// How many cameras detected each joint this frame (0: carried from before or estimated).
     pub views: [u8; KEYPOINTS],
+    /// Joints no camera saw that the body's anatomy filled in (see [`crate::Anatomy`]).
+    pub estimated: [bool; KEYPOINTS],
 }
 
 /// The left or right counterpart of a COCO joint.
@@ -80,6 +83,9 @@ pub struct BodySolver {
     samples: Vec<Vec<f64>>,
     previous: [Option<Vector3<f64>>; KEYPOINTS],
     missing: [u32; KEYPOINTS],
+    anatomy: Anatomy,
+    /// Fill in the joints nobody sees from the body's anatomy.
+    pub use_anatomy: bool,
 }
 
 impl BodySolver {
@@ -91,6 +97,8 @@ impl BodySolver {
             samples: vec![Vec::new(); LINK_COUNT],
             previous: [None; KEYPOINTS],
             missing: [0; KEYPOINTS],
+            anatomy: Anatomy::new(),
+            use_anatomy: true,
         }
     }
 
@@ -120,6 +128,7 @@ impl BodySolver {
         self.samples = vec![Vec::new(); LINK_COUNT];
         self.previous = [None; KEYPOINTS];
         self.missing = [0; KEYPOINTS];
+        self.anatomy.reset();
     }
 
     /// Solves one frame: `views[i]` is camera `i`'s keypoints (`x`, `y` in 0..1 of the frame, score).
@@ -138,7 +147,7 @@ impl BodySolver {
         let active: Vec<usize> = (0..KEYPOINTS).filter(|&k| x[k].is_some()).collect();
         if active.is_empty() {
             self.age_all();
-            return Solved { points: [[f32::NAN; 3]; KEYPOINTS], views: [0; KEYPOINTS] };
+            return Solved { points: [[f32::NAN; 3]; KEYPOINTS], views: [0; KEYPOINTS], estimated: [false; KEYPOINTS] };
         }
         self.refine(&mut x, &active, &detections, true);
         // Frames that fit well teach the bone lengths; then solve again with them.
@@ -166,7 +175,8 @@ impl BodySolver {
                 self.age(k);
             }
         }
-        Solved { points, views: counts }
+        let estimated = if self.use_anatomy { self.anatomy.complete(&mut points, &self.lengths, Vector3::new(0.0, 1.0, 0.0)) } else { [false; KEYPOINTS] };
+        Solved { points, views: counts, estimated }
     }
 
     fn age(&mut self, k: usize) {
