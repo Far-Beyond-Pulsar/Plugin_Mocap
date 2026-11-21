@@ -26,10 +26,8 @@ notes, format specification and status live in Pulsar-Native's `.agents/MOCAP.md
 - **Devices.** VMC/OSC performers (one listener per performer, from UDP port 39539) and OSC sensors
   such as IMUs (`/imu/quat`, `/imu/accel`, `/imu/gyro`, from UDP port 9100), plus a synthetic figure for
   testing.
-- **Mixing.** Every running source is merged into one rig with namespaced channels
-  (`<source id>/<name>`), so cameras, sensors and performers can be combined in any quantity.
-- **Cameras to 3D.** With two or more cameras placed or calibrated, each keypoint is triangulated from
-  every camera that sees it, so no single camera has to see the whole body.
+- **Mixing.** Every running source is merged into one rig with namespaced channels (`<source id>/<name>`), on one 60 Hz clock: each source is sampled between its own frames, and clock offsets between sources are found from how they moved.
+- **Cameras to 3D.** With two or more cameras placed or calibrated, one body is fitted to every camera's keypoints at once: bones keep their length, gross misses are down-weighted, and a joint only one camera sees still gets an answer, so no single camera has to see the whole body.
 - **One scene.** The Scene panel fuses everything into one subject (the current assumption is a single
   performer), the cameras standing where they were placed, and the sensors as axes.
 - **Takes.** Recording streams to a `.mocap` file as it is captured; a crash loses at most the last block.
@@ -155,7 +153,8 @@ scene as a `.blend`, and `MOCAP_NO_RENDER=1` to skip rendering and only save the
 ## Current limits
 
 - One subject; labelling several performers is later work.
-- No lens distortion model, and no per-camera time offsets; cameras are matched by arrival time.
+- VMC and sensor sources are not registered into the camera frame, and their rotations are not constraints in the body fit yet.
+- No lens distortion model. Sources are put on one clock by estimating their offsets from how they moved (Setup, Clocks); hardware sync (genlock, timecode) is not used.
 - Calibration from movement is the least exact method; board-based calibration (ChArUco or a
   checkerboard, which also gives lens intrinsics and metric scale) is planned and not built.
 - A calibration is not saved for reuse yet, and a custom layout cannot be entered camera by camera.

@@ -304,36 +304,6 @@ fn merging_one_rig_keeps_its_names_and_several_are_namespaced() {
 }
 
 #[test]
-fn the_mixer_merges_sources_holds_the_slower_and_gaps_the_silent() {
-    let vrm = vrm_humanoid();
-    let imu_channels = vec![SensorChannel::new("imu.rotation", "/imu/quat", mocap_format::ChannelKind::Rotation4)];
-    let imu = sensor_rig(&imu_channels);
-    let (fast, slow) = (PoseBus::new(64), PoseBus::new(64));
-    let (mut mixer, rig) = Mixer::new(vec![
-        MixInput { id: "fig".into(), rig: vrm.clone(), bus: fast.clone() },
-        MixInput { id: "imu".into(), rig: imu.clone(), bus: slow.clone() },
-    ]);
-    let index = RigIndex::new(&rig);
-    let imu_col = index.column("imu/imu.rotation").expect("imu column");
-    let hips_col = index.column("fig/Hips.position").expect("hips column");
-    let pose = RigIndex::new(&vrm);
-    slow.push(PoseFrame { sequence: 1, time_s: 0.0, values: vec![0.0, 0.0, 0.0, 1.0] });
-    fast.push(PoseFrame { sequence: 1, time_s: 0.01, values: synthetic_pose(&pose, 0, 100.0) });
-    fast.push(PoseFrame { sequence: 2, time_s: 0.02, values: synthetic_pose(&pose, 1, 100.0) });
-    // Much later, only the fast source speaks: the IMU is now stale.
-    fast.push(PoseFrame { sequence: 3, time_s: 1.0, values: synthetic_pose(&pose, 100, 100.0) });
-    let mut out = Vec::new();
-    mixer.pump(&mut out);
-    assert_eq!(out.len(), 4);
-    assert!(out.windows(2).all(|w| w[0].time_s <= w[1].time_s));
-    assert!(out[0].values[hips_col].is_nan(), "before the figure speaks it is a gap");
-    assert_eq!(out[1].values[imu_col + 3], 1.0, "the IMU's last value is held");
-    assert!(out[1].values[hips_col + 1].is_finite());
-    assert!(out[3].values[imu_col].is_nan(), "a silent source is a gap, not stale data");
-    assert!(out[3].values[hips_col + 1].is_finite());
-}
-
-#[test]
 fn a_sensor_decoder_maps_addresses_and_ignores_short_messages() {
     let channels = vec![
         SensorChannel::new("imu.rotation", "/imu/quat", mocap_format::ChannelKind::Rotation4),

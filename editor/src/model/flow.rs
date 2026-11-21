@@ -5,7 +5,7 @@
 
 use super::{SessionModel, SourceEntry};
 use editor_task_queue::{TaskDescription, TaskDuration};
-use mocap_capture::{arrange, rig_from_placements, Arrangement, CalibrationError, Calibrator, CameraRig, CameraSpec, Check, EstimatorSource, Features, Guide, HoldAverager, PoseFrame, Step, SAMPLES_TARGET};
+use mocap_capture::{BodySolver, arrange, rig_from_placements, Arrangement, CalibrationError, Calibrator, CameraRig, CameraSpec, Check, EstimatorSource, Features, Guide, HoldAverager, PoseFrame, Step, SAMPLES_TARGET};
 use mocap_format::{ChannelDesc, ChannelKind, Quantisation, RigProfile};
 use parking_lot::Mutex;
 use std::ops::Range;
@@ -13,8 +13,6 @@ use std::sync::Arc;
 
 /// Longest gap between the cameras' frames for them to count as one moment.
 const SYNC_WINDOW_S: f64 = 0.08;
-/// A triangulated point whose cameras disagree by more than this (pixels) is dropped.
-const MAX_POINT_ERROR_PX: f32 = 15.0;
 /// The body scale the priors assume (a 1.75 m adult).
 const DEFAULT_BODY_SCALE: f64 = 1.0;
 
@@ -90,6 +88,9 @@ impl Default for CalibrationFlow {
 pub struct Derived {
     /// `(index of the camera in the rig, its keypoint columns in the merged frame)`.
     pub cameras: Vec<(usize, Range<usize>)>,
+    /// The body fitted to every camera at once (see `mocap_capture::BodySolver`): it keeps state from
+    /// frame to frame, which is why it sits behind a lock.
+    solver: Mutex<BodySolver>,
 }
 
 impl Derived {
@@ -108,10 +109,10 @@ impl Derived {
                 Some((index, offsets[first]..offsets[last] + rig.channels[last].kind.width()))
             })
             .collect();
-        (cameras.len() >= 2).then_some(Self { cameras })
+        (cameras.len() >= 2).then(|| Self { cameras, solver: Mutex::new(BodySolver::new(calibrated)) })
     }
 
-    /// The 17 triangulated keypoints (`x, y, z` each; gaps are `NaN`) of one merged frame.
+    /// The 17 joints (`x, y, z` each; gaps are `NaN`) of one merged frame, from the body solver.
     pub fn triangulate(&self, rig: &CameraRig, values: &[f32]) -> Vec<f32> {
         let mut views: Vec<Option<Vec<[f32; 3]>>> = vec![None; rig.cameras.len()];
         for (index, range) in &self.cameras {
@@ -120,10 +121,7 @@ impl Derived {
             }
         }
         let refs: Vec<Option<&[[f32; 3]]>> = views.iter().map(|v| v.as_deref()).collect();
-        rig.triangulate_frame(&refs)
-            .into_iter()
-            .flat_map(|p| if p[3] <= MAX_POINT_ERROR_PX { [p[0], p[1], p[2]] } else { [f32::NAN; 3] })
-            .collect()
+        self.solver.lock().solve(&refs).points.iter().flatten().copied().collect()
     }
 
     /// Appends the triangulated group's channels to `rig`.
@@ -492,7 +490,10 @@ mod tests {
                 // Joints the figure lacks (the face) are simply not detected.
                 values.extend(if p == &[0.0; 3] && k != 0 { [f32::NAN, f32::NAN, 0.0] } else { project(c, *p) });
             }
-            entry.bus.push(PoseFrame { sequence: 1, time_s: 1.0, values });
+            // A dozen frames: the mixer runs a tenth of a second behind and interpolates between them.
+            for n in 0..12u64 {
+                entry.bus.push(PoseFrame { sequence: n + 1, time_s: 1.0 + n as f64 / 60.0, values: values.clone() });
+            }
         }
         (model, rig, truth)
     }
@@ -543,7 +544,7 @@ mod tests {
         for n in 1..=30u64 {
             for (entry, c) in model.sources.iter().zip(&cameras) {
                 let values: Vec<f32> = truth.iter().enumerate().flat_map(|(k, p)| if p == &[0.0; 3] && k != 0 { [f32::NAN, f32::NAN, 0.0] } else { project(c, *p) }).collect();
-                entry.bus.push(PoseFrame { sequence: n + 1, time_s: 1.0 + n as f64 / 60.0, values });
+                entry.bus.push(PoseFrame { sequence: n + 13, time_s: 1.0 + (12 + n) as f64 / 60.0, values });
             }
             model.pump();
         }

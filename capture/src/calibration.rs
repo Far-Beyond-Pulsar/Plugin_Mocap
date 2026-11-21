@@ -39,7 +39,7 @@ const LINK_QUALITY: f64 = 1.1;
 const MIN_SHARED: usize = 2;
 /// How much a keypoint's position is trusted (a webcam detector is steadier on the torso
 /// than on the hands and feet), COCO order.
-const RELIABILITY: [f64; KEYPOINTS] = [0.8, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 0.7, 0.7, 0.5, 0.5, 1.0, 1.0, 0.7, 0.7, 0.5, 0.5];
+pub(crate) const RELIABILITY: [f64; KEYPOINTS] = [0.8, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 0.7, 0.7, 0.5, 0.5, 1.0, 1.0, 0.7, 0.7, 0.5, 0.5];
 /// Pixel error beyond which an observation counts for less and less (robust loss).
 const ROBUST_PX: f64 = 4.0;
 /// Epipolar (Sampson) error, in pixels, under which a correspondence is an inlier.
@@ -131,12 +131,12 @@ impl CameraModel {
         (x[2] > 1e-3).then(|| [cx + self.focal_px * x[0] / x[2], cy + self.focal_px * x[1] / x[2]])
     }
 
-    fn normalise(&self, p: [f32; 3]) -> [f64; 2] {
+    pub(crate) fn normalise(&self, p: [f32; 3]) -> [f64; 2] {
         let (cx, cy) = self.centre();
         [(f64::from(p[0]) * f64::from(self.width) - cx) / self.focal_px, (f64::from(p[1]) * f64::from(self.height) - cy) / self.focal_px]
     }
 
-    fn pixel(&self, p: [f32; 3]) -> [f64; 2] {
+    pub(crate) fn pixel(&self, p: [f32; 3]) -> [f64; 2] {
         [f64::from(p[0]) * f64::from(self.width), f64::from(p[1]) * f64::from(self.height)]
     }
 
@@ -186,7 +186,7 @@ pub struct CameraRig {
 
 type Keypoints = Vec<[f32; 3]>;
 
-fn good(p: &[f32; 3]) -> bool {
+pub(crate) fn good(p: &[f32; 3]) -> bool {
     p[0].is_finite() && p[1].is_finite() && p[2] >= MIN_SCORE
 }
 

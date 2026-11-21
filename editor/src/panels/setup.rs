@@ -261,6 +261,41 @@ impl SetupPanel {
             }))
     }
 
+    /// The sources' clocks: each is offset by how late it stamps its frames, found from how they moved.
+    fn clocks_section(&self, cx: &App) -> Div {
+        let theme = cx.theme();
+        let m = self.model.read(cx);
+        let rows: Vec<Div> = m
+            .sources
+            .iter()
+            .filter(|s| s.has_poses() && s.running())
+            .map(|s| {
+                let id = s.descriptor.id.as_str();
+                let estimate = m.sync_report.iter().find(|(i, _)| i == id).and_then(|(_, e)| *e);
+                let text = match estimate {
+                    _ if m.clock_offset(id) != 0.0 => format!("{:+.0} ms", m.clock_offset(id) * 1000.0),
+                    Some(_) => "no clear match".to_owned(),
+                    None if m.sync_report.is_empty() => "not aligned".to_owned(),
+                    None => "no movement to go by".to_owned(),
+                };
+                h_flex()
+                    .gap_2()
+                    .text_xs()
+                    .child(div().flex_1().min_w_0().truncate().child(s.descriptor.label.clone()))
+                    .child(div().flex_shrink_0().text_color(theme.muted_foreground).child(text))
+            })
+            .collect();
+        section("Clocks", cx)
+            .child(note("Each source stamps its frames on its own clock. Move for a few seconds with every camera and sensor on you, then align: the offsets come from how the sources moved.", cx))
+            .children(rows)
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(action(&self.model, "clock-align", "Align clocks", SessionModel::align_clocks).ghost())
+                    .child(action(&self.model, "clock-reset", "Reset", SessionModel::reset_clocks).ghost()),
+            )
+    }
+
     fn pose_section(&self, cx: &App) -> Div {
         let m = self.model.read(cx);
         let state = match (&m.calibration, m.calibration.as_ref().map(|c| c.scale)) {
@@ -323,6 +358,6 @@ impl Render for SetupPanel {
                 column.child(self.start_section(cx))
             }
         };
-        column.child(self.pose_section(cx))
+        column.child(self.clocks_section(cx)).child(self.pose_section(cx))
     }
 }

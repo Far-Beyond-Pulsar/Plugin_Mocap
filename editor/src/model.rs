@@ -10,7 +10,7 @@
 use editor_task_queue::{TaskDescription, TaskDuration};
 use engine_fs::virtual_fs;
 use mocap_capture::{
-    CameraInput, CameraRig, apply_calibration, calibrate_neutral, coco17_rig, CaptureSource, EstimatorFactory, EstimatorSource, FilterSettings, MixInput, Mixer, OscSensorSource, PoseBus,
+    CameraInput, CameraRig, apply_calibration, calibrate_neutral, coco17_rig, CaptureSource, EstimatorFactory, EstimatorSource, FilterSettings, MixInput, Mixer, OscSensorSource, PoseBus, SyncEstimate,
     PoseFrame, Processor, RecordStats, Recorder, SessionClock, Skeleton, SourceDescriptor, SourceSink, SourceState,
     SyntheticSource, VideoMailbox, VmcSource,
 };
@@ -134,6 +134,10 @@ pub struct SessionModel {
     pose_path: Arc<Mutex<PathBuf>>,
     take_skeleton: Option<Skeleton>,
     mix: Option<MixState>,
+    /// How late each source's clock is (seconds), by source id; kept across rebuilds of the mixer.
+    clock_offsets: std::collections::HashMap<String, f64>,
+    /// What the last clock alignment found, by source id.
+    pub sync_report: Vec<(String, Option<SyncEstimate>)>,
     /// The solved cameras, once calibrated.
     pub camera_rig: Option<CameraRig>,
     /// Where the triangulated keypoints come from in a merged frame, while it applies.
@@ -182,6 +186,8 @@ impl SessionModel {
             pose_path: Arc::new(Mutex::new(PathBuf::new())),
             take_skeleton: None,
             mix: None,
+            clock_offsets: std::collections::HashMap::new(),
+            sync_report: Vec::new(),
             camera_rig: None,
             derived: None,
             rig_epoch: 0,
@@ -401,7 +407,10 @@ impl SessionModel {
             self.derived = None;
             self.rig = RigProfile::default();
         } else {
-            let (mixer, mut rig) = Mixer::new(inputs);
+            let (mut mixer, mut rig) = Mixer::new(inputs);
+            for (id, offset) in &self.clock_offsets {
+                mixer.set_offset(id, *offset);
+            }
             // With calibrated cameras, their keypoints are triangulated into 3D and recorded too.
             self.derived = self.camera_rig.as_ref().and_then(|cams| flow::Derived::for_rig(&rig, &ids, cams));
             if self.derived.is_some() {
@@ -476,6 +485,51 @@ impl SessionModel {
             *slot.lock() = Some(result);
             failed.map_or(Ok(()), Err)
         });
+    }
+
+    /// Aligns the sources' clocks from how they moved over the last seconds (the performer must be
+    /// moving, in view of every camera and wearing every sensor): the first camera tracker is the
+    /// reference, or the first source.
+    pub fn align_clocks(&mut self) {
+        let reference = self
+            .sources
+            .iter()
+            .find(|s| s.descriptor.id.starts_with("pose:") && s.running())
+            .or_else(|| self.sources.iter().find(|s| s.has_poses() && s.running()))
+            .map(|s| s.descriptor.id.clone());
+        let (Some(reference), Some(mix)) = (reference, self.mix.as_mut()) else {
+            self.status = "Aligning clocks needs two or more running pose or sensor sources".to_owned();
+            return;
+        };
+        if mix.ids.len() < 2 {
+            self.status = "Aligning clocks needs two or more running pose or sensor sources".to_owned();
+            return;
+        }
+        let report = mix.mixer.align(&reference, 8.0);
+        for (id, offset) in mix.mixer.offsets() {
+            self.clock_offsets.insert(id, offset);
+        }
+        let clear = report.iter().filter(|(id, e)| *id != reference && e.is_some_and(|e| e.margin >= 0.05 && e.correlation >= 0.3)).count();
+        self.status = format!("Clocks aligned to {reference}: {clear} of {} sources matched; the rest did not move enough or matched no one lag", report.len().saturating_sub(1));
+        self.sync_report = report;
+    }
+
+    /// Forgets every clock offset.
+    pub fn reset_clocks(&mut self) {
+        self.clock_offsets.clear();
+        self.sync_report.clear();
+        if let Some(mix) = &mut self.mix {
+            let ids: Vec<String> = mix.ids.clone();
+            for id in ids {
+                mix.mixer.set_offset(&id, 0.0);
+            }
+        }
+        self.status = "Clock offsets cleared".to_owned();
+    }
+
+    /// The clock offset of source `id`, seconds.
+    pub fn clock_offset(&self, id: &str) -> f64 {
+        self.clock_offsets.get(id).copied().unwrap_or(0.0)
     }
 
     /// One frame of work: results of tasks, the mixer, playback. True when
