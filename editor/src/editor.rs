@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use ui::dock::{DockChannel, DockItem, Panel, PanelEvent, PanelView};
 use ui::workspace::Workspace;
+use ui::PixelsExt as _;
 use ui::button::{Button, ButtonVariants as _};
 use ui::{h_flex, v_flex, ActiveTheme, IconName, Sizable as _};
 
@@ -24,10 +25,21 @@ pub struct MocapEditor {
 impl MocapEditor {
     /// A setup illustration shown large in the middle of the editor, over a dimmed backdrop; a click
     /// on the backdrop or the Close button dismisses it.
-    fn preview_modal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn preview_modal(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let theme = cx.theme().clone();
         let diagram = self.model.read(cx).preview?;
         let image = diagram.image()?;
+        // The card hugs the picture: the largest size with the picture's own aspect ratio that fits in
+        // 88 percent of the window beside the title bar and padding, so nothing is cropped or stretched.
+        const HEADER: f32 = 36.0;
+        const PAD: f32 = 8.0;
+        let natural = image.size(0);
+        let aspect = natural.width.0 as f32 / (natural.height.0 as f32).max(1.0);
+        let view = window.viewport_size();
+        let avail_w = (view.width.as_f32() * 0.88 - 2.0 * PAD).max(64.0);
+        let avail_h = (view.height.as_f32() * 0.88 - HEADER - 2.0 * PAD).max(64.0);
+        let picture_w = avail_w.min(avail_h * aspect);
+        let picture_h = picture_w / aspect;
         let close = {
             let model = self.model.clone();
             move |cx: &mut App| {
@@ -52,8 +64,9 @@ impl MocapEditor {
                 .child(
                     v_flex()
                         .id("mocap-preview-card")
-                        .w(relative(0.86))
-                        .h(relative(0.86))
+                        .w(px(picture_w + 2.0 * PAD))
+                        .h(px(picture_h + HEADER + 2.0 * PAD))
+                        .flex_shrink_0()
                         .rounded(theme.radius)
                         .border_1()
                         .border_color(theme.border)
@@ -74,7 +87,7 @@ impl MocapEditor {
                                 .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(diagram.title()))
                                 .child(Button::new("mocap-preview-close").icon(IconName::Close).label("Close").ghost().small().on_click(move |_, _, cx| close_button(cx))),
                         )
-                        .child(div().flex_1().min_h_0().p_2().child(img(image).size_full().object_fit(ObjectFit::Contain))),
+                        .child(div().p_2().child(img(image).w(px(picture_w)).h(px(picture_h)).object_fit(ObjectFit::Contain))),
                 )
                 .into_any_element(),
         )
@@ -241,7 +254,7 @@ impl Render for MocapEditor {
             Some(workspace) => workspace.clone().into_any_element(),
             None => div().size_full().into_any_element(),
         };
-        let modal = self.preview_modal(cx);
+        let modal = self.preview_modal(window, cx);
         div()
             .relative()
             .size_full()
