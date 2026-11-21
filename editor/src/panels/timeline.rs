@@ -183,7 +183,7 @@ impl TimelinePanel {
                         });
                     })),
             )
-            .child(div().w(px(190.)).text_xs().child(format!("Frame {:>6} / {:<6}  {:>7.2} s", frame as u64, total, seconds)))
+            .child(div().w(px(190.)).flex_shrink_0().whitespace_nowrap().overflow_hidden().text_xs().child(format!("Frame {:>6} / {:<6}  {:>7.2} s", frame as u64, total, seconds)))
             .child(
                 Button::new("timeline-zoom-out").label("-").ghost().small().on_click(cx.listener(|this, _, _, cx| {
                     let w = this.lane_width() / 2.0;
@@ -367,6 +367,8 @@ impl Render for TimelinePanel {
                 .items_center()
                 .justify_center()
                 .gap_2()
+                .px_4()
+                .text_center()
                 .text_xs()
                 .text_color(theme.muted_foreground)
                 .child(if loading { "Loading the take..." } else { "No take open." })

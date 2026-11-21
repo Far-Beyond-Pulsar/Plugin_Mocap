@@ -121,7 +121,7 @@ impl SourcesPanel {
                     cx.notify();
                 });
             })))
-            .child(add("pose-model", IconName::Cpu, "Pose model").ghost().tooltip((format!("Choose the ONNX keypoint model used by Track body (built-in MoveNet Lightning unless a file exists at {})", self.model.read(cx).pose_model_path().display()))).on_click(cx.listener(|this, _, _, cx| super::pick_pose_model(&this.model, cx))))
+            .child(add("pose-model", IconName::Cpu, "Pose model").ghost().tooltip(format!("Choose the ONNX keypoint model used by Track body (built-in MoveNet Lightning unless a file exists at {})", self.model.read(cx).pose_model_path().display())).on_click(cx.listener(|this, _, _, cx| super::pick_pose_model(&this.model, cx))))
             .child(add("list-cameras", IconName::Camera, "Find cameras").ghost().on_click(cx.listener(|this, _, _, cx| {
                 this.model.update(cx, |m, cx| {
                     m.refresh_cameras();

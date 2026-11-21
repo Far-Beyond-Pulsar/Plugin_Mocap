@@ -78,6 +78,7 @@ fn method_picker(model: &Entity<SessionModel>, current: CalibrationMethod, locke
     };
     h_flex()
         .gap_1()
+        .flex_wrap()
         .child(choose("m-ring", CalibrationMethod::Layout(Arrangement::Ring)))
         .child(choose("m-arc", CalibrationMethod::Layout(Arrangement::Arc)))
         .child(choose("m-line", CalibrationMethod::Layout(Arrangement::Line)))
@@ -98,9 +99,9 @@ fn number(model: &Entity<SessionModel>, name: &'static str, value: String, id: &
         .gap_1()
         .items_center()
         .text_xs()
-        .child(div().w(px(96.)).text_color(cx.theme().muted_foreground).child(name))
+        .child(div().w(px(96.)).flex_shrink_0().truncate().text_color(cx.theme().muted_foreground).child(name))
         .child(nudge("-", "-", -1.0))
-        .child(div().w(px(56.)).text_center().child(value))
+        .child(div().w(px(56.)).flex_shrink_0().whitespace_nowrap().text_center().child(value))
         .child(nudge("+", "+", 1.0))
 }
 
@@ -117,7 +118,7 @@ fn checklist(model: &SessionModel, cx: &App) -> impl IntoElement {
         } else {
             ("    ", theme.muted_foreground)
         };
-        h_flex().gap_2().text_xs().text_color(color).child(div().w(px(30.)).child(mark)).child(div().child(step.name()))
+        h_flex().gap_2().text_xs().text_color(color).child(div().w(px(30.)).flex_shrink_0().child(mark)).child(div().flex_1().min_w_0().truncate().child(step.name()))
     }))
 }
 
@@ -154,7 +155,7 @@ fn result(model: &Entity<SessionModel>, cx: &App) -> Div {
     let m = model.read(cx);
     let checks = m.calib.checks.iter().map(|check| {
         let (mark, color) = if check.passed { ("pass", theme.success) } else { ("FAIL", theme.danger) };
-        h_flex().gap_2().text_xs().child(div().w(px(32.)).text_color(color).child(mark)).child(div().child(format!("{}: {}", check.name, check.detail)))
+        h_flex().gap_2().items_start().text_xs().child(div().w(px(32.)).flex_shrink_0().text_color(color).child(mark)).child(div().flex_1().min_w_0().child(format!("{}: {}", check.name, check.detail)))
     });
     section("Result", cx)
         .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(theme.success).child(m.calibration_summary().unwrap_or_default()))
@@ -292,7 +293,7 @@ impl Render for SetupPanel {
             let m = self.model.read(cx);
             (m.calib.phase.clone(), m.camera_rig.is_some(), matches!(m.calib.method, CalibrationMethod::Layout(_)))
         };
-        let column = v_flex().id("mocap-setup-scroll").size_full().overflow_y_scroll().bg(cx.theme().background).child(self.cameras_section(cx));
+        let column = v_flex().id("mocap-setup-scroll").size_full().overflow_x_hidden().overflow_y_scroll().bg(cx.theme().background).child(self.cameras_section(cx));
         let column = match phase {
             CalibrationPhase::Guiding => column.child(guiding(&self.model, cx)),
             CalibrationPhase::Solving => column.child(section("Calibrating", cx).child(note("Solving the camera positions...", cx))),

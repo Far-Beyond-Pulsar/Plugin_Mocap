@@ -170,8 +170,8 @@ impl ScenePanel {
             h_flex()
                 .gap_1()
                 .items_center()
-                .child(div().size(px(8.)).bg(color))
-                .child(div().text_xs().text_color(theme.foreground).child(text))
+                .child(div().size(px(8.)).flex_shrink_0().bg(color))
+                .child(div().flex_1().min_w_0().text_xs().text_color(theme.foreground).child(text))
                 .into_any_element()
         };
         let mut rows = Vec::new();
@@ -243,6 +243,7 @@ impl Render for ScenePanel {
                     .absolute()
                     .top_2()
                     .left_2()
+                    .right_2()
                     .gap_0p5()
                     .child(div().text_xs().text_color(theme.muted_foreground).child(if empty {
                         "Nothing in the scene yet: start a source, or open a take"
