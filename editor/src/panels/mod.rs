@@ -4,6 +4,7 @@ mod setup;
 mod inspector;
 mod open;
 mod scene;
+mod scene_mesh;
 mod sources;
 mod timeline;
 mod viewport;

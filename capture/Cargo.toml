@@ -23,6 +23,8 @@ parking_lot = { workspace = true }
 thiserror = { workspace = true }
 nalgebra = { version = "0.32", default-features = false, features = ["std"] }
 tracing = { workspace = true }
+# The skinned character (a glTF/GLB, read without its textures).
+gltf = { version = "1", default-features = false, features = ["utils", "names"] }
 
 [dev-dependencies]
 nalgebra = { version = "0.32", default-features = false, features = ["std"] }

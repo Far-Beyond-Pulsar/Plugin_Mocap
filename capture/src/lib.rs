@@ -28,6 +28,7 @@ mod sync;
 mod blob;
 mod anatomy;
 mod bundle;
+mod character;
 mod wand;
 mod synthetic;
 mod vmc;
@@ -46,6 +47,7 @@ pub use keypoints::{coco17_rig, decode_single_person, letterbox_rgb, Letterbox, 
 pub use frame::{PixelFormat, PoseFrame, VideoFrame};
 pub use mix::{merge_rigs, MixInput, Mixer, DEFAULT_DELAY_S, DEFAULT_RATE_HZ, MAX_SYNC_LAG_S};
 pub use anatomy::Anatomy;
+pub use character::{BodyPoints, Bone, Character, CharacterError, Side, Vertex as CharacterVertex};
 pub use solver::{BodySolver, Solved, LINK_COUNT};
 pub use bundle::{bundle_adjust, Observation as BundleObservation, Options as BundleOptions, Report as BundleReport};
 pub use blob::{find_light, LightSpot};

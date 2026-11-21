@@ -3,12 +3,16 @@
 //! 3D view, built by `mocap_capture::build_scene` from all running sources (or
 //! from the take at the playhead).
 
+use super::scene_mesh::SceneMesh;
+use crate::character_view::View;
 use crate::model::SessionModel;
 use crate::paint::{pt, stroke_polyline};
 use gpui::prelude::*;
 use gpui::*;
 use mocap_capture::{FigureSource, Scene};
+use ui::button::{Button, ButtonVariants as _};
 use ui::dock::{Panel, PanelEvent};
+use ui::Sizable as _;
 use ui::PixelsExt as _;
 use ui::{h_flex, v_flex, ActiveTheme};
 
@@ -25,12 +29,40 @@ pub struct ScenePanel {
     pitch: f32,
     zoom: f32,
     drag: Option<Point<Pixels>>,
+    mesh: SceneMesh,
+    /// Draw the skinned character (else the stick figure).
+    show_mesh: bool,
+    /// What went wrong loading a character the user chose.
+    note: Option<String>,
+}
+
+impl ScenePanel {
+    /// Asks for a humanoid glTF (.glb) and shows it in place of the bundled character.
+    fn choose_character(&mut self, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("Choose a humanoid character (.glb)".into()) });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else { return };
+            let Some(path) = paths.into_iter().next() else { return };
+            let loaded = engine_fs::virtual_fs::read_file(&path).map_err(|e| format!("could not read {}: {e}", path.display())).and_then(|bytes| mocap_capture::Character::from_glb(&bytes).map_err(|e| e.to_string()));
+            let _ = this.update(cx, |this, cx| {
+                match loaded {
+                    Ok(character) => {
+                        this.mesh.set_character(std::sync::Arc::new(character));
+                        this.note = None;
+                    }
+                    Err(error) => this.note = Some(error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
 }
 
 impl ScenePanel {
     pub fn new(model: Entity<SessionModel>, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
-        Self { model, focus_handle: cx.focus_handle(), yaw: 0.45, pitch: 0.2, zoom: 1.0, drag: None }
+        Self { model, focus_handle: cx.focus_handle(), yaw: 0.45, pitch: 0.2, zoom: 1.0, drag: None, mesh: SceneMesh::default(), show_mesh: true, note: None }
     }
 }
 
@@ -45,6 +77,8 @@ fn orbit(p: [f32; 3], yaw: f32, pitch: f32) -> [f32; 3] {
 
 struct Drawn {
     scene: Scene,
+    /// The mesh is showing the subject, so the stick figure is left out.
+    hide_figure: bool,
     yaw: f32,
     pitch: f32,
     zoom: f32,
@@ -84,7 +118,7 @@ fn paint_scene(bounds: Bounds<Pixels>, drawn: &Drawn, palette: &Palette, window:
         line(window, [t, 0.0, -3.5], [t, 0.0, 3.5], 1.0, palette.floor);
         line(window, [-3.0, 0.0, t * 7.0 / 6.0], [3.0, 0.0, t * 7.0 / 6.0], 1.0, palette.floor);
     }
-    if let Some(subject) = &drawn.scene.subject {
+    if let (Some(subject), false) = (&drawn.scene.subject, drawn.hide_figure) {
         let figure = &subject.figure;
         let flat = figure.source == FigureSource::Keypoints;
         let opacity = if flat { 0.8 } else { 1.0 };
@@ -197,9 +231,16 @@ impl ScenePanel {
 }
 
 impl Render for ScenePanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let scene = self.model.read(cx).current_scene();
+        let view = View { yaw: self.yaw, pitch: self.pitch, height_m: VIEW_HEIGHT_M / self.zoom, pivot: PIVOT };
+        let background = {
+            let c = theme.background.to_rgb();
+            [f64::from(c.r), f64::from(c.g), f64::from(c.b)]
+        };
+        let figure = scene.subject.as_ref().map(|s| &s.figure).filter(|_| self.show_mesh);
+        let (surface, mesh_drawn) = self.mesh.element(window, &view, background, figure);
         let palette = Palette {
             floor: theme.border.opacity(0.6),
             centre: theme.foreground.opacity(0.9),
@@ -210,8 +251,9 @@ impl Render for ScenePanel {
             camera: theme.muted_foreground,
         };
         let legend = Self::legend(&scene, &palette, &theme);
+        let note = self.note.clone();
         let empty = scene.is_empty();
-        let drawn = Drawn { scene, yaw: self.yaw, pitch: self.pitch, zoom: self.zoom };
+        let drawn = Drawn { scene, hide_figure: mesh_drawn, yaw: self.yaw, pitch: self.pitch, zoom: self.zoom };
         v_flex()
             .size_full()
             .relative()
@@ -237,7 +279,19 @@ impl Render for ScenePanel {
                 this.zoom = (this.zoom * (1.0 + dy * 0.002)).clamp(0.3, 6.0);
                 cx.notify();
             }))
+            .child(div().absolute().inset_0().child(surface))
             .child(canvas(|bounds, _, _| bounds, move |_, bounds, window, _| paint_scene(bounds, &drawn, &palette, window)).size_full())
+            .child(
+                div().absolute().top_1().right_2().child(
+                    h_flex()
+                        .gap_1()
+                        .child(Button::new("scene-character").label("Character...").ghost().xsmall().on_click(cx.listener(|this, _, _, cx| this.choose_character(cx))))
+                        .child(Button::new("scene-mesh").label(if self.show_mesh { "Show skeleton" } else { "Show character" }).ghost().xsmall().on_click(cx.listener(|this, _, _, cx| {
+                            this.show_mesh = !this.show_mesh;
+                            cx.notify();
+                        }))),
+                ),
+            )
             .child(
                 v_flex()
                     .absolute()
@@ -250,6 +304,7 @@ impl Render for ScenePanel {
                     } else {
                         "Drag to orbit, scroll to zoom"
                     }))
+                    .children(note.map(|n| div().text_xs().text_color(theme.danger).child(n)))
                     .children(legend),
             )
     }

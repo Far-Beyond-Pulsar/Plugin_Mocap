@@ -6,6 +6,7 @@
 //! all over one [`SessionModel`].
 
 mod blit;
+mod character_view;
 mod curves;
 mod diagrams;
 mod editor;
