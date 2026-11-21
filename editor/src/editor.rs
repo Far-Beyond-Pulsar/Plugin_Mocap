@@ -1,13 +1,14 @@
 //! The mocap editor: one dock workspace over one session model.
 
 use crate::model::SessionModel;
-use crate::panels::{InspectorPanel, ScenePanel, SourcesPanel, TimelinePanel, ViewportPanel};
+use crate::panels::{InspectorPanel, ScenePanel, SetupPanel, SourcesPanel, TimelinePanel, ViewportPanel};
 use gpui::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 use ui::dock::{DockChannel, DockItem, Panel, PanelEvent, PanelView};
 use ui::workspace::Workspace;
-use ui::{h_flex, ActiveTheme};
+use ui::button::{Button, ButtonVariants as _};
+use ui::{h_flex, v_flex, ActiveTheme, IconName, Sizable as _};
 
 /// The dock channel the mocap editor's panels share (others are 1 and 3 to 7).
 const DOCK_CHANNEL: u32 = 8;
@@ -38,6 +39,7 @@ impl MocapEditor {
             let scene: Arc<dyn PanelView> = Arc::new(cx.new(|cx| ScenePanel::new(model.clone(), cx)));
             let sources: Arc<dyn PanelView> = Arc::new(cx.new(|cx| SourcesPanel::new(model.clone(), cx)));
             let inspector: Arc<dyn PanelView> = Arc::new(cx.new(|cx| InspectorPanel::new(model.clone(), cx)));
+            let setup: Arc<dyn PanelView> = Arc::new(cx.new(|cx| SetupPanel::new(model.clone(), cx)));
             let timeline: Arc<dyn PanelView> = Arc::new(cx.new(|cx| TimelinePanel::new(model.clone(), cx)));
             let center = DockItem::split(
                 Axis::Horizontal,
@@ -50,11 +52,83 @@ impl MocapEditor {
                 cx,
             );
             let left = DockItem::tabs(vec![sources], Some(0), &dock, window, cx);
-            let right = DockItem::tabs(vec![inspector], Some(0), &dock, window, cx);
+            let right = DockItem::tabs(vec![setup, inspector], Some(0), &dock, window, cx);
             let bottom = DockItem::tabs(vec![timeline], Some(0), &dock, window, cx);
             workspace.initialize(center, Some(left), Some(right), Some(bottom), window, cx);
         });
         self.workspace = Some(workspace);
+    }
+}
+
+impl MocapEditor {
+    /// The strip above the panels: recording, and the state of the session at a glance.
+    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let (recording, blocker, summary) = {
+            let m = self.model.read(cx);
+            (m.is_recording(), m.record_blocker(), m.calibration_summary())
+        };
+        let record = Button::new("mocap-record")
+            .icon(if recording { IconName::Pause } else { IconName::Circle })
+            .label(if recording { "Stop" } else { "Record" })
+            .tooltip(blocker.unwrap_or(if recording { "Stop recording" } else { "Record every running pose and sensor source" }))
+            .small()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.model.update(cx, |m, cx| {
+                    if m.is_recording() {
+                        m.stop_recording();
+                    } else {
+                        m.start_recording();
+                    }
+                    cx.notify();
+                });
+            }));
+        let record = if recording { record.danger() } else { record.ghost() };
+        h_flex()
+            .w_full()
+            .h(px(34.))
+            .px_2()
+            .gap_1()
+            .items_center()
+            .flex_shrink_0()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(record)
+            .child(Button::new("mocap-marker").icon(IconName::Bookmark).label("Marker").ghost().small().on_click(cx.listener(|this, _, _, cx| {
+                this.model.update(cx, |m, cx| {
+                    m.mark();
+                    cx.notify();
+                });
+            })))
+            .child(div().flex_1())
+            .child(div().text_xs().text_color(theme.muted_foreground).child(summary.unwrap_or_else(|| "Cameras not set up: see the Setup tab".to_owned())))
+    }
+
+    /// The strip below the panels: what the session is doing.
+    fn status_bar(&self, cx: &App) -> impl IntoElement {
+        let theme = cx.theme();
+        let m = self.model.read(cx);
+        let live = m.sources.iter().filter(|s| s.running()).count();
+        let recording = if m.is_recording() {
+            let stats = m.record_stats;
+            format!("REC {} frames, {} gap, {} dropped", stats.frames, stats.gap_frames, m.bus_dropped())
+        } else {
+            m.record_blocker().map(|r| format!("Record: {r}")).unwrap_or_default()
+        };
+        h_flex()
+            .w_full()
+            .h(px(24.))
+            .px_2()
+            .gap_3()
+            .items_center()
+            .flex_shrink_0()
+            .border_t_1()
+            .border_color(theme.border)
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .child(div().flex_1().min_w_0().truncate().child(m.status.clone()))
+            .child(div().child(recording))
+            .child(div().child(format!("{live} of {} sources live", m.sources.len())))
     }
 }
 
@@ -109,6 +183,11 @@ impl Render for MocapEditor {
             Some(workspace) => workspace.clone().into_any_element(),
             None => div().size_full().into_any_element(),
         };
-        div().size_full().bg(cx.theme().background).child(content)
+        v_flex()
+            .size_full()
+            .bg(cx.theme().background)
+            .child(self.toolbar(cx))
+            .child(div().flex_1().min_h_0().w_full().child(content))
+            .child(self.status_bar(cx))
     }
 }

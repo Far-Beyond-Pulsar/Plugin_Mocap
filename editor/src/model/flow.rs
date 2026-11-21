@@ -176,6 +176,11 @@ impl SessionModel {
         self.calib.hfov_deg = (self.calib.hfov_deg + hfov_deg).clamp(30.0, 120.0);
     }
 
+    /// How many cameras are tracking the body right now.
+    pub fn tracked_camera_count(&self) -> usize {
+        self.running_trackers().len()
+    }
+
     /// Calibrates from the chosen layout: the cameras are placed as described, in order of their
     /// sources, so no movement is needed.
     pub fn apply_camera_layout(&mut self) {

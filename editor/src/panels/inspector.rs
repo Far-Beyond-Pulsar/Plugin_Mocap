@@ -1,4 +1,4 @@
-//! The inspector: the take, the rig, the live filter and the calibration.
+//! The inspector: the take, the selected channel and the live filter (calibration is in Setup).
 
 use crate::model::SessionModel;
 use gpui::prelude::*;

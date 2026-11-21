@@ -95,7 +95,7 @@ impl SourcesPanel {
     }
 
     fn add_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let add = |id: &'static str, icon: IconName, label: &'static str| Button::new(id).icon(icon).label(label).small();
+        let add = |id: &'static str, icon: IconName, label: &'static str| Button::new(id).icon(icon).label(label).xsmall();
         h_flex()
             .p_2()
             .gap_1()
@@ -121,7 +121,7 @@ impl SourcesPanel {
                     cx.notify();
                 });
             })))
-            .child(add("pose-model", IconName::Cpu, "Pose model").ghost().tooltip("Choose the ONNX keypoint model used by Track body").on_click(cx.listener(|this, _, _, cx| super::pick_pose_model(&this.model, cx))))
+            .child(add("pose-model", IconName::Cpu, "Pose model").ghost().tooltip((format!("Choose the ONNX keypoint model used by Track body (built-in MoveNet Lightning unless a file exists at {})", self.model.read(cx).pose_model_path().display()))).on_click(cx.listener(|this, _, _, cx| super::pick_pose_model(&this.model, cx))))
             .child(add("list-cameras", IconName::Camera, "Find cameras").ghost().on_click(cx.listener(|this, _, _, cx| {
                 this.model.update(cx, |m, cx| {
                     m.refresh_cameras();
@@ -182,12 +182,10 @@ impl Render for SourcesPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let count = self.model.read(cx).sources.len();
-        let status = self.model.read(cx).status.clone();
         v_flex()
             .size_full()
             .bg(theme.background)
             .child(self.add_bar(cx))
-            .child(div().px_2().text_xs().text_color(theme.muted_foreground).truncate().child(format!("Pose model: built-in MoveNet Lightning, unless a file exists at {}", self.model.read(cx).pose_model_path().display())))
             .child(self.camera_choices(cx))
             .child(
                 v_flex()
@@ -199,6 +197,5 @@ impl Render for SourcesPanel {
                     })
                     .children((0..count).map(|i| self.row(i, cx))),
             )
-            .child(div().px_2().py_1().text_xs().text_color(theme.muted_foreground).border_t_1().border_color(theme.border).truncate().child(status))
     }
 }

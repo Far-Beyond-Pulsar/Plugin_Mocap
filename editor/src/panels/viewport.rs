@@ -1,5 +1,6 @@
-//! The camera viewport: the live video on a WGPU surface with draggable HUD
-//! cards (record controls, capture stats) on a panel canvas.
+//! The camera viewport: the live video on a WGPU surface, with the skeleton and keypoints drawn
+//! over it and a thin header of view toggles. No floating cards: the controls live in the editor's
+//! toolbar and status bar and in the Setup panel.
 
 use crate::blit::FrameBlit;
 use crate::model::SessionModel;
@@ -9,7 +10,6 @@ use std::collections::HashMap;
 use ui::PixelsExt as _;
 use ui::button::{Button, ButtonVariants as _};
 use ui::dock::{Panel, PanelEvent};
-use ui::panel_canvas::{DragHandle, PanelCanvas, PanelCanvasState, PanelRef, RndPanel, Slot, SlotAnchor};
 use ui::{h_flex, v_flex, ActiveTheme, IconName, Selectable as _, Sizable as _};
 
 /// The surface's pixel format (the window compositor's, not sRGB).
@@ -22,21 +22,12 @@ pub struct ViewportPanel {
     surface: Option<WgpuSurfaceHandle>,
     blit: Option<FrameBlit>,
     seen_video: HashMap<String, u64>,
-    overlay: Entity<PanelCanvasState>,
 }
 
 impl ViewportPanel {
     pub fn new(model: Entity<SessionModel>, cx: &mut Context<Self>) -> Self {
-        let overlay = cx.new(|_| {
-            PanelCanvasState::new().with_slots([
-                Slot::new("toolbar", SlotAnchor::TopLeft, size(px(580.), px(44.))).inset(px(8.), px(8.)),
-                Slot::new("stats", SlotAnchor::TopRight, size(px(360.), px(130.))).inset(px(8.), px(8.)),
-                Slot::new("calibration", SlotAnchor::TopLeft, size(px(360.), px(300.))).inset(px(8.), px(60.)),
-            ])
-        });
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
-        cx.observe(&overlay, |_, _, cx| cx.notify()).detach();
-        Self { model, focus_handle: cx.focus_handle(), surface: None, blit: None, seen_video: HashMap::new(), overlay }
+        Self { model, focus_handle: cx.focus_handle(), surface: None, blit: None, seen_video: HashMap::new() }
     }
 
     fn ensure_surface(&mut self, window: &mut Window) {
@@ -83,128 +74,43 @@ impl ViewportPanel {
         surface.present_synced_silent(submission);
     }
 
-    fn stats_text(&self, cx: &App) -> Vec<String> {
-        let model = self.model.read(cx);
-        let mut lines = Vec::new();
-        for source in model.sources.iter().filter(|s| s.running()) {
-            let status = source.status();
-            lines.push(format!("{}  {:.0} Hz", source.descriptor.label, status.rate_hz));
-        }
-        if let Some(blit) = &self.blit {
-            for (key, _) in model.video_feeds() {
-                if let Some((w, h)) = blit.video_size(&key) {
-                    lines.push(format!("{key}: {w}x{h}"));
-                }
-            }
-        }
-        if let Some(line) = model.calibration_summary() {
-            lines.push(line);
-        }
-        if model.is_recording() {
-            let stats = model.record_stats;
-            lines.push(format!("REC {} frames, {} gap, {} dropped", stats.frames, stats.gap_frames, model.bus_dropped()));
-        } else if let Some(reason) = model.record_blocker() {
-            lines.push(format!("Record: {reason}"));
-        }
-        if lines.is_empty() {
-            lines.push("No source running".to_owned());
-        }
-        lines
-    }
-
-    fn toolbar(&self, cx: &mut Context<Self>) -> RndPanel {
+    /// The thin strip above the video: what is shown, and the view toggles.
+    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let recording = self.model.read(cx).is_recording();
-        let mirror = self.model.read(cx).mirror;
-        let panel = PanelRef::new(&self.overlay, "toolbar");
-        let blocker = self.model.read(cx).record_blocker();
-        let record = Button::new("mocap-record")
-            .icon(if recording { IconName::Pause } else { IconName::Circle })
-            .label(if recording { "Stop" } else { "Record" })
-            .tooltip(blocker.unwrap_or(if recording { "Stop recording" } else { "Record every running pose and sensor source" }))
-            .small()
-            .on_click(cx.listener(move |this, _, _, cx| {
+        let (overlay, mirror) = {
+            let m = self.model.read(cx);
+            (m.show_overlay, m.mirror)
+        };
+        let feeds: Vec<String> = self
+            .model
+            .read(cx)
+            .video_feeds()
+            .into_iter()
+            .filter_map(|(key, _)| self.blit.as_ref()?.video_size(&key).map(|(w, h)| format!("{key} {w}x{h}")))
+            .collect();
+        let toggle = |id: &'static str, icon: IconName, label: &'static str, on: bool| Button::new(id).icon(icon).label(label).ghost().xsmall().selected(on);
+        h_flex()
+            .w_full()
+            .h(px(28.))
+            .px_2()
+            .gap_1()
+            .items_center()
+            .flex_shrink_0()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(toggle("view-skeleton", IconName::Eye, "Skeleton", overlay).on_click(cx.listener(|this, _, _, cx| {
                 this.model.update(cx, |m, cx| {
-                    if m.is_recording() {
-                        m.stop_recording();
-                    } else {
-                        m.start_recording();
-                    }
+                    m.show_overlay = !m.show_overlay;
                     cx.notify();
                 });
-            }));
-        let record = if recording { record.danger() } else { record.ghost() };
-        let action = |id: &'static str, icon: IconName, label: &'static str| Button::new(id).icon(icon).label(label).ghost().small();
-        RndPanel::new(panel.clone())
-            .bg(theme.background.opacity(0.88))
-            .border_1()
-            .border_color(theme.border)
-            .rounded(theme.radius)
-            .shadow_md()
-            .child(
-                h_flex()
-                    .h_full()
-                    .items_center()
-                    .child(DragHandle::new(panel).w(px(14.)).h_full().border_r_1().border_color(theme.border))
-                    .child(
-                        h_flex()
-                            .px_1()
-                            .gap_1()
-                            .child(record)
-                            .child(action("mocap-marker", IconName::Bookmark, "Marker").on_click(cx.listener(|this, _, _, cx| {
-                                this.model.update(cx, |m, cx| {
-                                    m.mark();
-                                    cx.notify();
-                                });
-                            })))
-                            .child(action("mocap-calibrate", IconName::User, "Calibrate").on_click(cx.listener(|this, _, _, cx| {
-                                this.model.update(cx, |m, cx| {
-                                    m.calibrate();
-                                    cx.notify();
-                                });
-                            })))
-                            .child(action("mocap-skeleton", IconName::Eye, "Skeleton").selected(self.model.read(cx).show_overlay).on_click(cx.listener(|this, _, _, cx| {
-                                this.model.update(cx, |m, cx| {
-                                    m.show_overlay = !m.show_overlay;
-                                    cx.notify();
-                                });
-                            })))
-                            .child(action("mocap-mirror", IconName::Camera, "Mirror").selected(mirror).on_click(cx.listener(
-                                |this, _, _, cx| {
-                                    this.model.update(cx, |m, cx| {
-                                        m.mirror = !m.mirror;
-                                        cx.notify();
-                                    });
-                                },
-                            ))),
-                    ),
-            )
-            .default_slot("toolbar")
-            .default_size(size(px(580.), px(40.)))
-    }
-
-    fn stats_card(&self, cx: &App) -> RndPanel {
-        let theme = cx.theme();
-        let panel = PanelRef::new(&self.overlay, "stats");
-        RndPanel::new(panel.clone())
-            .bg(theme.background.opacity(0.80))
-            .border_1()
-            .border_color(theme.border)
-            .rounded(theme.radius)
-            .child(
-                h_flex()
-                    .size_full()
-                    .child(DragHandle::new(panel).w(px(14.)).h_full().border_r_1().border_color(theme.border))
-                    .child(
-                        v_flex()
-                            .p_2()
-                            .gap_0p5()
-                            .text_xs()
-                            .children(self.stats_text(cx).into_iter().map(|line| div().child(line))),
-                    ),
-            )
-            .default_slot("stats")
-            .default_size(size(px(360.), px(120.)))
+            })))
+            .child(toggle("view-mirror", IconName::Camera, "Mirror", mirror).on_click(cx.listener(|this, _, _, cx| {
+                this.model.update(cx, |m, cx| {
+                    m.mirror = !m.mirror;
+                    cx.notify();
+                });
+            })))
+            .child(div().flex_1().min_w_0().truncate().text_xs().text_color(theme.muted_foreground).text_right().child(feeds.join("   ")))
     }
 }
 
@@ -271,8 +177,12 @@ impl Render for ViewportPanel {
             !video_live,
             |d| d.child("No camera running. Add one in Sources, or start a pose source."),
         );
-        let canvas = PanelCanvas::new("mocap-viewport-canvas", &self.overlay)
-            .size_full()
+        // The picture and what is drawn on it (the keypoints belong to the video, so they are drawn in place).
+        let view = div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .w_full()
             .child(div().absolute().inset_0().child(surface))
             .child(div().absolute().inset_0().when_some(skeleton, |d, (joints, bones)| {
                 d.child(canvas(|bounds, _, _| bounds, move |_, bounds, window, _| crate::paint::draw_front_skeleton(window, bounds, &joints, &bones, mirror, accent)).size_full())
@@ -284,10 +194,7 @@ impl Render for ViewportPanel {
                     crate::paint::draw_keypoints(window, bounds, rect, points, mirror, accent);
                 }
             }).size_full()))
-            .child(hint)
-            .panel(self.toolbar(cx))
-            .panel(self.stats_card(cx))
-            .panel(super::calibration::card(&self.model, &self.overlay, cx));
-        div().size_full().bg(theme.background).child(canvas)
+            .child(hint);
+        v_flex().size_full().bg(theme.background).child(self.header(cx)).child(view)
     }
 }

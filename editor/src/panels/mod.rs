@@ -1,6 +1,6 @@
 //! The dockable panels of the mocap editor; each reads the shared session model.
 
-mod calibration;
+mod setup;
 mod inspector;
 mod open;
 mod scene;
@@ -11,6 +11,7 @@ mod viewport;
 pub use inspector::InspectorPanel;
 pub(crate) use open::{pick_pose_model, pick_take};
 pub use scene::ScenePanel;
+pub use setup::SetupPanel;
 pub use sources::SourcesPanel;
 pub use timeline::TimelinePanel;
 pub use viewport::ViewportPanel;
