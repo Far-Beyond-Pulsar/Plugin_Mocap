@@ -50,7 +50,7 @@ pub use anatomy::Anatomy;
 pub use character::{BodyPoints, Bone, Character, CharacterError, Side, Vertex as CharacterVertex};
 pub use solver::{BodySolver, Solved, LINK_COUNT};
 pub use bundle::{bundle_adjust, Observation as BundleObservation, Options as BundleOptions, Report as BundleReport};
-pub use blob::{find_light, LightSpot};
+pub use blob::{find_light, LightSpot, LightTracker};
 pub use wand::{WandCalibrator, WandError, WandResult, MAX_SAMPLES as WAND_MAX_SAMPLES, MIN_SAMPLES as WAND_MIN_SAMPLES, SAMPLES_TARGET as WAND_SAMPLES_TARGET};
 pub use sync::{estimate_offset, ColumnPlan, History, SyncEstimate};
 pub use processor::{apply_calibration, calibrate_neutral, FilterSettings, Processor};

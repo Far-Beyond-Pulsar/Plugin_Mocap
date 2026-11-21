@@ -3,7 +3,7 @@
 
 use super::{CalibrationFlow, Method, Phase, SessionModel, SYNC_WINDOW_S};
 use editor_task_queue::{TaskDescription, TaskDuration};
-use mocap_capture::{find_light, CameraSpec, Check, WandCalibrator, WAND_SAMPLES_TARGET};
+use mocap_capture::{CameraSpec, Check, LightTracker, WandCalibrator, WAND_SAMPLES_TARGET};
 use std::sync::Arc;
 
 /// What a camera last showed.
@@ -13,6 +13,8 @@ pub(super) struct WandView {
     time_s: f64,
     spot: Option<[f64; 2]>,
     size: (u32, u32),
+    /// Looks for the moving light in this camera's frames.
+    tracker: LightTracker,
 }
 
 impl CalibrationFlow {
@@ -31,12 +33,12 @@ impl CalibrationFlow {
             .collect()
     }
 
-    /// Moments collected, and where the light has been, per camera: `(camera id, moments seen, coverage 0..1)`.
-    pub fn wand_progress(&self) -> Vec<(String, usize, f64)> {
+    /// Per camera: `(id, moments seen, coverage 0..1, what its tracker sees)`.
+    pub fn wand_progress(&self) -> Vec<(String, usize, f64, &'static str)> {
         self.wand_cams
             .iter()
             .enumerate()
-            .map(|(i, id)| (id.clone(), self.wand_seen.get(i).copied().unwrap_or(0), self.wand_coverage.get(i).copied().unwrap_or(0.0)))
+            .map(|(i, id)| (id.clone(), self.wand_seen.get(i).copied().unwrap_or(0), self.wand_coverage.get(i).copied().unwrap_or(0.0), self.wand_views.get(i).map_or("learning the picture", |v| v.tracker.status())))
             .collect()
     }
 }
@@ -59,7 +61,7 @@ impl SessionModel {
             };
             ids.push(s.descriptor.id.clone());
             specs.push(CameraSpec { id: s.descriptor.id.clone(), width: frame.width, height: frame.height });
-            views.push(WandView { size: (frame.width, frame.height), ..WandView::default() });
+            views.push(WandView { size: (frame.width, frame.height), tracker: LightTracker::new(), ..WandView::default() });
         }
         if ids.len() < 2 {
             self.status = "Calibrating with a light needs at least two running cameras".to_owned();
@@ -92,7 +94,11 @@ impl SessionModel {
             if frame.sequence == view.seq {
                 continue;
             }
-            *view = WandView { seq: frame.sequence, time_s: frame.time_s, spot: find_light(&frame).map(|s| [s.x, s.y]), size: (frame.width, frame.height) };
+            let spot = view.tracker.update(&frame).map(|s| [s.x, s.y]);
+            view.seq = frame.sequence;
+            view.time_s = frame.time_s;
+            view.spot = spot;
+            view.size = (frame.width, frame.height);
             fresh = true;
         }
         if !fresh {

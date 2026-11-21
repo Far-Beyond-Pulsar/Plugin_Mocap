@@ -180,14 +180,20 @@ fn wand_guiding(model: &Entity<SessionModel>, cx: &App) -> Div {
         .calib
         .wand_progress()
         .into_iter()
-        .map(|(id, seen, coverage)| {
+        .map(|(id, seen, coverage, status)| {
             let color = if coverage >= 0.5 { theme.success } else { theme.warning };
-            h_flex()
-                .gap_2()
-                .text_xs()
-                .child(div().flex_1().min_w_0().truncate().child(id))
-                .child(div().flex_shrink_0().child(format!("{seen} moments")))
-                .child(div().w(px(64.)).flex_shrink_0().text_color(color).child(format!("{:.0}% of image", coverage * 100.0)))
+            let status_color = if status == "seeing the light" { theme.success } else { theme.muted_foreground };
+            v_flex()
+                .gap_0p5()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .text_xs()
+                        .child(div().flex_1().min_w_0().truncate().child(id))
+                        .child(div().flex_shrink_0().child(format!("{seen} moments")))
+                        .child(div().flex_shrink_0().text_color(color).child(format!("{:.0}% of image", coverage * 100.0))),
+                )
+                .child(div().text_xs().text_color(status_color).child(status))
         })
         .collect();
     section("Wave the light", cx)

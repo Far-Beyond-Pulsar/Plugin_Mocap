@@ -106,3 +106,162 @@ pub fn find_light(frame: &VideoFrame) -> Option<LightSpot> {
     }
     Some(LightSpot { x: swx / sw, y: swy / sw, area, peak: top })
 }
+
+/// Finds a moving light in a lit room, where a plain "brightest point" would find a monitor or a window: it learns
+/// what each part of the picture normally looks like and looks for something that is suddenly brighter, bright
+/// and small. One tracker per camera, fed every frame.
+#[derive(Clone, Debug, Default)]
+pub struct LightTracker {
+    size: (usize, usize),
+    background: Vec<f32>,
+    frames: u32,
+    status: &'static str,
+}
+
+/// How much the picture is shrunk before looking for change (each cell is the brightest of its pixels).
+const CELL: usize = 4;
+/// A cell is lit by a light when it is this much brighter than usual, and at least this bright.
+const MIN_RISE: f32 = 45.0;
+const MIN_LEVEL: f32 = 140.0;
+/// The size of a light, in cells.
+const MAX_CELLS: usize = 700;
+/// Frames spent learning before it reports anything.
+const WARM_UP: u32 = 8;
+
+impl LightTracker {
+    /// A tracker that has seen nothing yet.
+    pub fn new() -> Self {
+        Self { status: "learning the picture", ..Self::default() }
+    }
+
+    /// Why the last frame gave what it gave: for showing to the person waving the light.
+    pub fn status(&self) -> &'static str {
+        if self.status.is_empty() {
+            "learning the picture"
+        } else {
+            self.status
+        }
+    }
+
+    /// Looks for the light in `frame` and learns from it.
+    pub fn update(&mut self, frame: &VideoFrame) -> Option<LightSpot> {
+        let (w, h) = (frame.width as usize, frame.height as usize);
+        if w < 2 * CELL || h < 2 * CELL || !frame.is_well_formed() {
+            return None;
+        }
+        let (cw, ch) = (w / CELL, h / CELL);
+        let data = &frame.data;
+        let mut small = vec![0.0f32; cw * ch];
+        for cy in 0..ch {
+            for cx in 0..cw {
+                let mut best = 0u8;
+                for dy in 0..CELL {
+                    let row = ((cy * CELL + dy) * w + cx * CELL) * 4;
+                    for dx in 0..CELL {
+                        let i = row + dx * 4;
+                        best = best.max(data[i].max(data[i + 1]).max(data[i + 2]));
+                    }
+                }
+                small[cy * cw + cx] = f32::from(best);
+            }
+        }
+        if self.size != (cw, ch) || self.background.len() != small.len() {
+            self.size = (cw, ch);
+            self.background = small.clone();
+            self.frames = 0;
+            self.status = "learning the picture";
+            return None;
+        }
+        self.frames += 1;
+        let rise: Vec<f32> = small.iter().zip(&self.background).map(|(s, b)| s - b).collect();
+        let lit = |i: usize| rise[i] >= MIN_RISE && small[i] >= MIN_LEVEL;
+        // Learn: quickly at first, then slowly, and hardly at all where something just lit up.
+        let rate = if self.frames < WARM_UP { 0.4 } else { 0.03 };
+        for i in 0..small.len() {
+            let r = if lit(i) { rate * 0.05 } else { rate };
+            self.background[i] += (small[i] - self.background[i]) * r;
+        }
+        if self.frames < WARM_UP {
+            self.status = "learning the picture";
+            return None;
+        }
+        // Connected patches of lit cells, by how much light they added.
+        let mut seen = vec![false; small.len()];
+        let mut patches: Vec<(f32, Vec<usize>)> = Vec::new();
+        let mut stack = Vec::new();
+        for start in 0..small.len() {
+            if seen[start] || !lit(start) {
+                continue;
+            }
+            seen[start] = true;
+            stack.push(start);
+            let (mut weight, mut cells) = (0.0f32, Vec::new());
+            while let Some(i) = stack.pop() {
+                weight += rise[i];
+                cells.push(i);
+                let (x, y) = (i % cw, i / cw);
+                for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx < 0 || ny < 0 || nx >= cw as i32 || ny >= ch as i32 {
+                        continue;
+                    }
+                    let j = ny as usize * cw + nx as usize;
+                    if !seen[j] && lit(j) {
+                        seen[j] = true;
+                        stack.push(j);
+                    }
+                }
+            }
+            patches.push((weight, cells));
+        }
+        patches.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let Some((weight, cells)) = patches.first() else {
+            self.status = "no new bright point: wave the light in view";
+            return None;
+        };
+        let count = cells.len();
+        if count > MAX_CELLS {
+            self.status = "too much light changed: keep the room steady, only the light should move";
+            return None;
+        }
+        if patches.get(1).is_some_and(|second| *weight < second.0 * 1.4) {
+            self.status = "more than one bright point is moving: cover the others";
+            return None;
+        }
+        // The exact spot, from the full-resolution pixels around the patch.
+        let (sx, sy) = cells.iter().fold((0.0f64, 0.0f64), |(ax, ay), &i| (ax + (i % cw) as f64, ay + (i / cw) as f64));
+        let (cx, cy) = ((sx / count as f64 + 0.5) * CELL as f64, (sy / count as f64 + 0.5) * CELL as f64);
+        let reach = (CELL as f64 * (2.0 + (count as f64).sqrt())).ceil() as i64;
+        let (x0, x1) = ((cx as i64 - reach).max(0), (cx as i64 + reach).min(w as i64 - 1));
+        let (y0, y1) = ((cy as i64 - reach).max(0), (cy as i64 + reach).min(h as i64 - 1));
+        let value = |x: i64, y: i64| {
+            let i = (y as usize * w + x as usize) * 4;
+            data[i].max(data[i + 1]).max(data[i + 2])
+        };
+        let peak = (y0..=y1).flat_map(|y| (x0..=x1).map(move |x| (x, y))).map(|(x, y)| value(x, y)).max().unwrap_or(0);
+        if peak < MIN_LEVEL as u8 {
+            self.status = "the bright point is too dim";
+            return None;
+        }
+        let threshold = f32::from(peak) * 0.7;
+        let (mut sw, mut swx, mut swy, mut area) = (0.0f64, 0.0f64, 0.0f64, 0usize);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let v = f32::from(value(x, y));
+                if v >= threshold {
+                    let wgt = f64::from(v - threshold) + 1.0;
+                    sw += wgt;
+                    swx += wgt * (x as f64 + 0.5);
+                    swy += wgt * (y as f64 + 0.5);
+                    area += 1;
+                }
+            }
+        }
+        if area == 0 {
+            self.status = "the bright point is too dim";
+            return None;
+        }
+        self.status = "seeing the light";
+        Some(LightSpot { x: swx / sw, y: swy / sw, area, peak })
+    }
+}
