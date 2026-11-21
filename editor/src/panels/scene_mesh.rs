@@ -25,11 +25,11 @@ fn bundled() -> Option<Arc<Character>> {
         .clone()
 }
 
-/// The body a figure describes, for posing; `None` for a flat (single-camera) figure, which has no depth to pose from.
+/// The body a figure describes, for posing.
 pub fn body_of(figure: &SceneFigure) -> Option<BodyPoints> {
     match figure.source {
-        FigureSource::Keypoints => None,
-        FigureSource::Triangulated => {
+        // A single camera's keypoints are flat (no depth), but the character is posed in that plane, facing the camera.
+        FigureSource::Keypoints | FigureSource::Triangulated => {
             let mut p = [[f32::NAN; 3]; 17];
             for (slot, name) in p.iter_mut().zip(mocap_capture::COCO17) {
                 if let Some(i) = figure.names.iter().position(|n| n == name) {
