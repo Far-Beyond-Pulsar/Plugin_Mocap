@@ -22,6 +22,64 @@ pub struct MocapEditor {
 }
 
 impl MocapEditor {
+    /// A setup illustration shown large in the middle of the editor, over a dimmed backdrop; a click
+    /// on the backdrop or the Close button dismisses it.
+    fn preview_modal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let theme = cx.theme().clone();
+        let diagram = self.model.read(cx).preview?;
+        let image = diagram.image()?;
+        let close = {
+            let model = self.model.clone();
+            move |cx: &mut App| {
+                model.update(cx, |m, cx| {
+                    m.preview = None;
+                    cx.notify();
+                });
+            }
+        };
+        let (close_backdrop, close_button) = (close.clone(), close);
+        Some(
+            div()
+                .id("mocap-preview-backdrop")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::black().opacity(0.62))
+                .on_click(move |_, _, cx| close_backdrop(cx))
+                .child(
+                    v_flex()
+                        .id("mocap-preview-card")
+                        .w(relative(0.86))
+                        .h(relative(0.86))
+                        .rounded(theme.radius)
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.background)
+                        .shadow_lg()
+                        .overflow_hidden()
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .h(px(36.))
+                                .px_3()
+                                .flex_shrink_0()
+                                .items_center()
+                                .justify_between()
+                                .border_b_1()
+                                .border_color(theme.border)
+                                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(diagram.title()))
+                                .child(Button::new("mocap-preview-close").icon(IconName::Close).label("Close").ghost().small().on_click(move |_, _, cx| close_button(cx))),
+                        )
+                        .child(div().flex_1().min_h_0().p_2().child(img(image).size_full().object_fit(ObjectFit::Contain))),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// An editor on `path`: a non-empty file opens as a take, an empty or new one starts a session.
     pub fn new(path: PathBuf, cx: &mut Context<Self>) -> Self {
         let model = cx.new(|_| SessionModel::new(path.clone()));
@@ -183,11 +241,18 @@ impl Render for MocapEditor {
             Some(workspace) => workspace.clone().into_any_element(),
             None => div().size_full().into_any_element(),
         };
+        let modal = self.preview_modal(cx);
+        div()
+            .relative()
+            .size_full()
+            .child(
         v_flex()
             .size_full()
             .bg(cx.theme().background)
             .child(self.toolbar(cx))
             .child(div().flex_1().min_h_0().w_full().child(content))
             .child(self.status_bar(cx))
+            )
+            .children(modal)
     }
 }

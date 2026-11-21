@@ -37,6 +37,24 @@ fn section(title: &'static str, cx: &App) -> Div {
         .child(div().text_xs().font_weight(FontWeight::SEMIBOLD).text_color(cx.theme().muted_foreground).child(title))
 }
 
+/// An illustration that opens enlarged when clicked.
+fn picture(model: &Entity<SessionModel>, diagram: Diagram, image: std::sync::Arc<RenderImage>) -> impl IntoElement {
+    let model = model.clone();
+    div()
+        .id(SharedString::from(format!("picture-{diagram:?}")))
+        .w_full()
+        .aspect_ratio(1.6)
+        .cursor_pointer()
+        .tooltip(|window, cx| ui::tooltip::Tooltip::new("Click to enlarge").build(window, cx))
+        .on_click(move |_, _, cx| {
+            model.update(cx, |m, cx| {
+                m.preview = Some(diagram);
+                cx.notify();
+            });
+        })
+        .child(img(image).size_full().object_fit(ObjectFit::Contain))
+}
+
 fn note(text: impl Into<SharedString>, cx: &App) -> Div {
     div().text_xs().text_color(cx.theme().muted_foreground).child(text.into())
 }
@@ -199,7 +217,7 @@ impl SetupPanel {
         let theme = cx.theme().clone();
         section("2  Method", cx)
             .child(method_picker(&self.model, current, locked))
-            .when_some(diagram.image(), |col, image| col.child(div().w_full().aspect_ratio(1.6).child(img(image).size_full().object_fit(ObjectFit::Contain))))
+            .when_some(diagram.image(), |col, image| col.child(picture(&self.model, diagram, image)))
             .child(note(text, cx))
             .when_some(failure, |col, reason| col.child(div().text_xs().text_color(theme.danger).child(reason)))
     }
@@ -228,7 +246,7 @@ impl SetupPanel {
                         .ok();
                     }),
             )
-            .when_some(space, |col, image| col.child(div().w_full().aspect_ratio(1.6).child(img(image).size_full().object_fit(ObjectFit::Contain))))
+            .when_some(space, |col, image| col.child(picture(&self.model, Diagram::Space, image)))
     }
 
     fn start_section(&self, cx: &App) -> Div {

@@ -122,6 +122,8 @@ pub struct SessionModel {
     pub selected_channel: Option<usize>,
     pub mirror: bool,
     pub show_overlay: bool,
+    /// A setup illustration open enlarged in a modal.
+    pub preview: Option<crate::diagrams::Diagram>,
     pub status: String,
     pub loading: bool,
     pub record_stats: RecordStats,
@@ -170,6 +172,7 @@ impl SessionModel {
             selected_channel: None,
             mirror: true,
             show_overlay: true,
+            preview: None,
             status: String::new(),
             loading: false,
             record_stats: RecordStats::default(),

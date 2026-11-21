@@ -30,6 +30,17 @@ impl Diagram {
         }
     }
 
+    /// What the picture shows, for the title of its enlarged view.
+    pub fn title(self) -> &'static str {
+        match self {
+            Diagram::Ring => "Ring: cameras evenly around the subject",
+            Diagram::Arc => "Arc: cameras in front, like a stage",
+            Diagram::Line => "Line: a wall of cameras",
+            Diagram::Body => "Movement: cameras anywhere, positions found from the subject's movement",
+            Diagram::Space => "The space to keep clear around the subject",
+        }
+    }
+
     fn index(self) -> usize {
         Self::ALL.iter().position(|d| *d == self).unwrap_or(0)
     }
