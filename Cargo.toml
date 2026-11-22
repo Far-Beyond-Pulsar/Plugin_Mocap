@@ -8,12 +8,17 @@ description = "Motion capture (pulsar.mocap): the plugin's root crate, the one p
 autoexamples = false
 
 [features]
+# The plugin as a library of its own, loaded by the editor from plugins/editor:
+# cargo build -p <this package> --release --features dll
+dll = ["dep:plugin_editor_api", "plugin_editor_api/editor", "plugin_editor_api/shared-dylibs"]
 default = ["camera", "pose"]
 # Webcam capture (the OS's own camera API through nokhwa).
 camera = ["mocap_editor/camera"]
 pose = ["mocap_editor/pose"]
 
 [dependencies]
+# The plugin library's editor plugin entry point (feature `dll`).
+plugin_editor_api = { workspace = true, optional = true }
 # The plugin gate and the editor provider's registration.
 pulsar_plugins = { workspace = true }
 plugin_manager = { workspace = true }
@@ -23,3 +28,7 @@ mocap_format = { path = "format" }
 
 [lints]
 workspace = true
+
+# Also the plugin as a library of its own (feature `dll`, loaded by the editor).
+[lib]
+crate-type = ["cdylib", "rlib"]

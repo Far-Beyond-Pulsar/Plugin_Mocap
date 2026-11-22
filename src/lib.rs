@@ -47,3 +47,8 @@ mod tests {
         assert_eq!(provider.editors()[0].supported_file_types.len(), 1);
     }
 }
+
+// The plugin as a library of its own, loaded by the editor from `plugins/editor`
+// (`cargo build -p <this package> --release --features dll`).
+#[cfg(feature = "dll")]
+plugin_editor_api::export_library_plugin!();
